@@ -1007,6 +1007,11 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .detail-risk { min-width: 160px; }
   .detail-risk .risk-line { font-size: 12.5px; color: var(--ink-muted); margin-top: 4px; }
 
+  @media (max-width: 760px) {
+    .app { height: auto; min-height: 100vh; }
+    .table-wrap { flex: none; }
+  }
+
   .empty-state {
     padding: 48px 20px;
     text-align: center;
