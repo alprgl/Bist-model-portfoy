@@ -81,7 +81,7 @@ HISTORY_FILE = Path("./history.csv")
 DOCS_DIR = Path(__file__).resolve().parent / "docs"   # GitHub Pages buradan yayinlanir
 GIT_AUTO_PUBLISH = True    # True ise her calistirmada docs/index.html otomatik commit+push edilir
 
-AUTO_TOP_N_BY_MARKET_CAP = False   # True yaparsan BIST100_TICKERS yok sayılır
+AUTO_TOP_N_BY_MARKET_CAP = True    # True yaparsan BIST100_TICKERS yok sayılır
 TOP_N = 100
 
 # Skorlama eşikleri (KAZRISK/model-portfoy sohbetinde belirlenen kurallar)
