@@ -26,13 +26,13 @@ NASIL ÇALIŞIR
      - Net Borç trendi (Finansal Borçlar - Nakit, YoY karşılaştırma)
    hesaplar.
 3. PD/DD'yi kendi sektör ortalamasına oranlar (o an için hesaplanabilir).
-4. F/K'nin kendi geçmişine göre ucuz/pahalı olduğunu VE fiyatın piyasaya
-   göre göreceli performansını değerlendirebilmek için, HER ÇALIŞTIRMADA
-   bir "history.csv" dosyasına o günün fiyat/F-K/PD-DD verisini ekler.
-   Birkaç hafta biriktikten sonra (örn. 8+ hafta) script bu geçmişi
-   kullanarak kendi F/K ortalamasına göre ucuzluk ve piyasaya göre
-   göreceli getiriyi organik olarak hesaplamaya başlar. İlk haftalarda bu
-   iki alt-kriter puana dahil edilmez (veri birikene kadar 0 katkı verir).
+4. Fiyatın piyasaya göre göreceli performansını (~1 aylık getiri) Yahoo
+   Finance'ten anlık hesaplar (ilk haftadan itibaren çalışır). F/K'nin
+   kendi geçmişine göre ucuz/pahalı olduğunu değerlendirebilmek için ise
+   HER ÇALIŞTIRMADA bir "history.csv" dosyasına o günün fiyat/F-K/PD-DD
+   verisini ekler; 8+ hafta biriktikten sonra script bu geçmişi kullanarak
+   kendi F/K ortalamasına göre ucuzluğu organik olarak hesaplamaya başlar
+   (veri birikene kadar bu tek alt-kriter 0 katkı verir).
 5. Risk filtresi: halka açıklık oranı ve piyasa değeri eşiklerini
    uygulayarak likidite/manipülasyon riski taşıyan hisseleri eler.
 6. Sonuçları skora göre sıralayıp bir Excel dosyasına yazar
@@ -90,7 +90,6 @@ RISK_MIN_MARKET_CAP_MN = 5000.0    # Mn TL - cok kucuk/likit olmayan sirketleri 
 RISK_MAX_NET_BORC_OZKAYNAK = 2.5   # katsayi ustu ELENIR (hesaplanabiliyorsa)
 
 MIN_WEEKS_FOR_OWN_PE_HISTORY = 8   # bu kadar hafta biriken veriden sonra "F/K kendi ortalamasina gore" hesaplanir
-MIN_WEEKS_FOR_RELATIVE_RETURN = 4  # bu kadar hafta sonra "piyasaya gore goreceli getiri" hesaplanir
 
 REQUEST_DELAY_SEC = 0.4            # API'ye nazik davranmak icin istekler arasi bekleme
 REQUEST_TIMEOUT_SEC = 20
@@ -353,8 +352,17 @@ def load_history():
 
 
 def append_history(companies: dict, run_date: str):
-    """Bu calistirmanin fiyat/F-K/PD-DD anlik goruntusunu history.csv'ye ekler."""
+    """Bu calistirmanin fiyat/F-K/PD-DD anlik goruntusunu history.csv'ye ekler.
+    Ayni gun icin zaten kayit varsa (script yanlislikla iki kez calistirilirsa)
+    tekrar eklemez - aksi halde haftalik index'e dayali hesaplar (weeks_back)
+    bozulur."""
     file_exists = HISTORY_FILE.exists()
+    if file_exists:
+        with open(HISTORY_FILE, "r", encoding="utf-8", newline="") as f:
+            existing_dates = {row["date"] for row in csv.DictReader(f)}
+        if run_date in existing_dates:
+            print(f"history.csv: {run_date} tarihli kayit zaten var, tekrar eklenmedi.")
+            return
     with open(HISTORY_FILE, "a", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
@@ -362,23 +370,6 @@ def append_history(companies: dict, run_date: str):
         for ticker, c in companies.items():
             writer.writerow([run_date, ticker, c.get("price"), c.get("pe"), c.get("pb")])
     print(f"history.csv guncellendi (+{len(companies)} satir, tarih={run_date}).")
-
-
-def compute_relative_return(history_for_ticker, weeks_back=4):
-    """Yaklasik `weeks_back` hafta once ile karsilastirarak fiyat getirisi doner (%).
-    weeks_back=None verilirse takip edilen en eski kayitla (baslangictan) karsilastirir."""
-    if not history_for_ticker or len(history_for_ticker) < 2:
-        return None
-    sorted_hist = sorted(history_for_ticker, key=lambda r: r["date"])
-    latest = sorted_hist[-1]
-    if weeks_back is None:
-        old = sorted_hist[0]
-    else:
-        target_idx = max(0, len(sorted_hist) - 1 - weeks_back)
-        old = sorted_hist[target_idx]
-    if latest["price"] is None or old["price"] in (None, 0):
-        return None
-    return (latest["price"] - old["price"]) / old["price"] * 100.0
 
 
 def compute_own_pe_ratio(history_for_ticker, current_pe, min_points=8):
@@ -470,7 +461,7 @@ def score_layer_b(company, sector_pb_avg, own_pe_ratio, relative_return):
             score += 6
         elif relative_return <= 0:
             score += 3
-        notes.append(f"Göreceli getiri (~history bazlı) {relative_return:.1f}%")
+        notes.append(f"Göreceli getiri (Yahoo, ~1 ay) {relative_return:.1f}%")
 
     if own_pe_ratio is not None:
         if own_pe_ratio < 0.7:
@@ -638,11 +629,11 @@ def write_excel_report(rows, run_date_str, output_path: Path):
 
     note_row = last_row + 3
     ws.merge_cells(f"A{note_row}:Q{note_row}")
-    ws[f"A{note_row}"] = ("Not: Katman B'deki 'göreceli getiri' ve 'kendi F/K ortalaması' alt-kriterleri "
-                           f"history.csv dosyasındaki birikmiş veriye bağlıdır — ilk {MIN_WEEKS_FOR_RELATIVE_RETURN}-"
-                           f"{MIN_WEEKS_FOR_OWN_PE_HISTORY} hafta boyunca eksik/0 gelebilir, bu normaldir. "
-                           "Günlük/Haftalık/Aylık/Yıllık % sütunları Yahoo Finance'ten çekilen gerçek fiyat "
-                           "geçmişine dayanır; bir hissenin verisi çekilemezse boş kalır.")
+    ws[f"A{note_row}"] = ("Not: Katman B'deki 'göreceli getiri' Yahoo Finance'ten (~1 aylık getiri) hesaplanır, "
+                           "ilk haftadan itibaren calisir. 'F/K ÷ kendi ortalaması' ise history.csv'deki birikmiş "
+                           f"veriye bağlıdır — ilk {MIN_WEEKS_FOR_OWN_PE_HISTORY} hafta boyunca eksik/0 gelebilir, "
+                           "bu normaldir. Günlük/Haftalık/Aylık/Yıllık % sütunları da Yahoo Finance'ten çekilen "
+                           "gerçek fiyat geçmişine dayanır; bir hissenin verisi çekilemezse boş kalır.")
     ws[f"A{note_row}"].font = Font(name=FONT, size=9, italic=True, color="7F7F7F")
     ws[f"A{note_row}"].alignment = left
 
@@ -1347,13 +1338,15 @@ def main():
         fin = analyze_financials(detail, company.get("fin_group"))
         layer_a_score, layer_a_notes = score_layer_a(fin)
 
+        yahoo_series = fetch_yahoo_price_history(ticker)
+        time.sleep(REQUEST_DELAY_SEC)
+        period_returns = compute_period_returns(yahoo_series)
+
         hist_for_ticker = history.get(ticker, [])
         own_pe_ratio = compute_own_pe_ratio(hist_for_ticker, company.get("pe"),
                                              min_points=MIN_WEEKS_FOR_OWN_PE_HISTORY)
-        relative_return = compute_relative_return(hist_for_ticker,
-                                                    weeks_back=MIN_WEEKS_FOR_RELATIVE_RETURN)
         layer_b_score, layer_b_notes = score_layer_b(
-            company, sector_pb_avg.get(company.get("sector_code")), own_pe_ratio, relative_return
+            company, sector_pb_avg.get(company.get("sector_code")), own_pe_ratio, period_returns["ret_1m"]
         )
 
         risk_passed, risk_status = apply_risk_filter(company, fin)
@@ -1361,10 +1354,6 @@ def main():
         total_score = None
         if layer_a_score is not None:
             total_score = layer_a_score + layer_b_score
-
-        yahoo_series = fetch_yahoo_price_history(ticker)
-        time.sleep(REQUEST_DELAY_SEC)
-        period_returns = compute_period_returns(yahoo_series)
 
         rows.append({
             "ticker": ticker,
