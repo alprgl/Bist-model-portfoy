@@ -81,6 +81,11 @@ HISTORY_FILE = Path("./history.csv")
 DOCS_DIR = Path(__file__).resolve().parent / "docs"   # GitHub Pages buradan yayinlanir
 GIT_AUTO_PUBLISH = True    # True ise her calistirmada docs/index.html otomatik commit+push edilir
 
+PORTFOLIO_FILE = Path("./portfoy.csv")                # su anki 5-6 hisselik model portfoyun
+PORTFOLIO_HISTORY_FILE = Path("./portfoy_gecmis.csv")  # gecmis donemlerin gerceklesen getirisi
+PORTFOLIO_SIZE = 6            # portfoyde kac hisse tutulacak
+PORTFOLIO_REBALANCE_DAYS = 30 # bu kadar gun gecince portfoy yeniden olusturulur
+
 AUTO_TOP_N_BY_MARKET_CAP = False   # True yaparsan BIST100_TICKERS yok sayılır
 TOP_N = 100
 
@@ -502,6 +507,127 @@ def apply_risk_filter(company, fin):
 
 
 # =============================================================================
+# MODEL PORTFÖY TAKİBİ (5-6 hisselik, aylık rebalance edilen gerçek portföy)
+# =============================================================================
+
+def load_portfolio():
+    """portfoy.csv'yi [{'rebalance_date','ticker','name','sector','entry_price',
+    'entry_score'}, ...] seklinde okur. Dosya yoksa bos liste doner."""
+    if not PORTFOLIO_FILE.exists():
+        return []
+    with open(PORTFOLIO_FILE, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["entry_price"] = float(r["entry_price"]) if r["entry_price"] else None
+        r["entry_score"] = float(r["entry_score"]) if r["entry_score"] not in ("", "None") else None
+    return rows
+
+
+def save_portfolio(holdings):
+    """Su anki portfoyu (rebalance sonrasi) portfoy.csv'ye yazar (ustune yazar)."""
+    with open(PORTFOLIO_FILE, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["rebalance_date", "ticker", "name", "sector", "entry_price", "entry_score"])
+        for h in holdings:
+            writer.writerow([h["rebalance_date"], h["ticker"], h["name"], h["sector"],
+                              h["entry_price"], h["entry_score"]])
+
+
+def load_portfolio_history():
+    """portfoy_gecmis.csv'yi liste olarak okur (yoksa bos liste)."""
+    if not PORTFOLIO_HISTORY_FILE.exists():
+        return []
+    with open(PORTFOLIO_HISTORY_FILE, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["entry_price"] = float(r["entry_price"]) if r["entry_price"] else None
+        r["exit_price"] = float(r["exit_price"]) if r["exit_price"] else None
+        r["getiri_pct"] = float(r["getiri_pct"]) if r["getiri_pct"] else None
+        r["gun_sayisi"] = int(r["gun_sayisi"]) if r["gun_sayisi"] else None
+    return rows
+
+
+def append_portfolio_history(records):
+    """Rebalance ile kapanan donemin gerceklesen getirisini portfoy_gecmis.csv'ye ekler."""
+    file_exists = PORTFOLIO_HISTORY_FILE.exists()
+    with open(PORTFOLIO_HISTORY_FILE, "a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["giris_tarihi", "cikis_tarihi", "ticker", "name",
+                              "entry_price", "exit_price", "getiri_pct", "gun_sayisi"])
+        for r in records:
+            writer.writerow([r["giris_tarihi"], r["cikis_tarihi"], r["ticker"], r["name"],
+                              r["entry_price"], r["exit_price"], f"{r['getiri_pct']:.2f}", r["gun_sayisi"]])
+
+
+def update_model_portfolio(rows, all_companies, run_date_str):
+    """Mevcut portfoyu gunceller: PORTFOLIO_REBALANCE_DAYS gun dolmus veya hic
+    portfoy yoksa, o anki en yuksek skorlu (risk filtresini gecen) PORTFOLIO_SIZE
+    hisseyle yeniden olusturur (eski sepetin gerceklesen getirisini gecmis
+    kaydina yazarak). Her cagrida, mevcut sepetin GUNCEL fiyatlarla anlik
+    (henuz gerceklesmemis) getirisini de hesaplayip doner.
+    Doner: (enriched_holdings, just_rebalanced: bool)"""
+    existing = load_portfolio()
+    run_date = date.fromisoformat(run_date_str)
+
+    needs_rebalance = True
+    if existing:
+        last_date = date.fromisoformat(existing[0]["rebalance_date"])
+        needs_rebalance = (run_date - last_date).days >= PORTFOLIO_REBALANCE_DAYS
+
+    if needs_rebalance:
+        if existing:
+            closed = []
+            for h in existing:
+                current = all_companies.get(h["ticker"])
+                exit_price = current.get("price") if current else None
+                if exit_price and h["entry_price"]:
+                    getiri = (exit_price - h["entry_price"]) / h["entry_price"] * 100.0
+                    closed.append({
+                        "giris_tarihi": h["rebalance_date"], "cikis_tarihi": run_date_str,
+                        "ticker": h["ticker"], "name": h["name"],
+                        "entry_price": h["entry_price"], "exit_price": exit_price,
+                        "getiri_pct": getiri,
+                        "gun_sayisi": (run_date - date.fromisoformat(h["rebalance_date"])).days,
+                    })
+            if closed:
+                append_portfolio_history(closed)
+
+        candidates = sorted(
+            (r for r in rows if r["risk_passed"] and r["total_score"] is not None),
+            key=lambda r: -r["total_score"],
+        )[:PORTFOLIO_SIZE]
+        new_holdings = []
+        for r in candidates:
+            company = all_companies.get(r["ticker"], {})
+            new_holdings.append({
+                "rebalance_date": run_date_str, "ticker": r["ticker"], "name": r["name"],
+                "sector": r["sector"], "entry_price": company.get("price"),
+                "entry_score": r["total_score"],
+            })
+        save_portfolio(new_holdings)
+        current_holdings = new_holdings
+    else:
+        current_holdings = existing
+
+    enriched = []
+    for h in current_holdings:
+        company = all_companies.get(h["ticker"], {})
+        current_price = company.get("price")
+        ret = None
+        if current_price and h["entry_price"]:
+            ret = (current_price - h["entry_price"]) / h["entry_price"] * 100.0
+        enriched.append({
+            **h,
+            "current_price": current_price,
+            "unrealized_return_pct": ret,
+            "days_held": (run_date - date.fromisoformat(h["rebalance_date"])).days,
+        })
+
+    return enriched, needs_rebalance
+
+
+# =============================================================================
 # EXCEL RAPORU
 # =============================================================================
 
@@ -901,6 +1027,41 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     font-variant-numeric: tabular-nums;
   }
 
+  /* ---- Tab bar ---- */
+  .tabbar {
+    display: flex;
+    gap: 4px;
+    margin: 14px 0 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border: none;
+    background: none;
+    color: var(--ink-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--ink); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+  .section-title {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 18px 2px 8px;
+  }
+  .portfolio-table-wrap { flex: none; max-height: none; margin-bottom: 4px; }
+  .portfolio-table-wrap table { min-width: 700px; }
+
   /* ---- Table ---- */
   .table-wrap {
     flex: 1;
@@ -1043,28 +1204,67 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     </div>
   </header>
 
-  <section class="stats" id="stats"></section>
+  <nav class="tabbar">
+    <button class="tab-btn active" data-view="tarama">Tüm Tarama</button>
+    <button class="tab-btn" data-view="portfoy">Model Portföy</button>
+  </nav>
 
-  <section class="toolbar">
-    <div class="search-field">
-      <input id="search" type="text" placeholder="Kod veya şirket ara…" autocomplete="off">
+  <div id="view-tarama" class="view">
+    <section class="stats" id="stats"></section>
+
+    <section class="toolbar">
+      <div class="search-field">
+        <input id="search" type="text" placeholder="Kod veya şirket ara…" autocomplete="off">
+      </div>
+      <select id="sector-filter"></select>
+      <label class="toggle-chip">
+        <input type="checkbox" id="risk-toggle" checked>
+        Sadece riski geçenler
+      </label>
+      <span class="result-count" id="result-count"></span>
+    </section>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr id="head-row"></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty-state" id="empty-state" style="display:none;">Aramanla eşleşen hisse yok.</div>
     </div>
-    <select id="sector-filter"></select>
-    <label class="toggle-chip">
-      <input type="checkbox" id="risk-toggle" checked>
-      Sadece riski geçenler
-    </label>
-    <span class="result-count" id="result-count"></span>
-  </section>
+  </div>
 
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr id="head-row"></tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
-    <div class="empty-state" id="empty-state" style="display:none;">Aramanla eşleşen hisse yok.</div>
+  <div id="view-portfoy" class="view" style="display:none;">
+    <section class="stats" id="portfolio-stats"></section>
+
+    <div class="table-wrap portfolio-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Kod</th><th>Şirket</th><th>Sektör</th><th class="num">Giriş Tarihi</th>
+            <th class="num">Giriş Fiyatı</th><th class="num">Güncel Fiyat</th>
+            <th class="num">Getiri %</th><th class="num">Giriş Skoru</th>
+          </tr>
+        </thead>
+        <tbody id="portfolio-tbody"></tbody>
+      </table>
+    </div>
+
+    <h3 class="section-title">Geçmiş Dönemler</h3>
+    <div class="table-wrap portfolio-table-wrap" id="portfolio-history-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Kod</th><th class="num">Giriş</th><th class="num">Çıkış</th>
+            <th class="num">Giriş Fiyatı</th><th class="num">Çıkış Fiyatı</th>
+            <th class="num">Getiri %</th><th class="num">Gün</th>
+          </tr>
+        </thead>
+        <tbody id="portfolio-history-tbody"></tbody>
+      </table>
+      <div class="empty-state" id="portfolio-history-empty">Henüz kapanmış bir dönem yok — ilk rebalance'tan sonra burada görünecek.</div>
+    </div>
   </div>
 
   <footer>
@@ -1075,6 +1275,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
 <script>
   const DATA = __BIST_DATA__;
+  const PORTFOLIO = __PORTFOLIO_DATA__;
+  const PORTFOLIO_HISTORY = __PORTFOLIO_HISTORY__;
+  const REBALANCE_DAYS = __REBALANCE_DAYS__;
   const RUN_DATE = "__RUN_DATE__";
 
   document.getElementById('run-date').textContent = RUN_DATE;
@@ -1246,20 +1449,98 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   sectorSel.addEventListener('change', render);
   riskToggle.addEventListener('change', render);
 
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const view = btn.dataset.view;
+      document.getElementById('view-tarama').style.display = view === 'tarama' ? 'flex' : 'none';
+      document.getElementById('view-portfoy').style.display = view === 'portfoy' ? 'flex' : 'none';
+    });
+  });
+
+  function renderPortfolioStats() {
+    const el = document.getElementById('portfolio-stats');
+    if (!PORTFOLIO.length) {
+      el.innerHTML = '<div class="stat"><span class="stat-label">Durum</span><span class="stat-value">—</span><span class="stat-sub">Henüz portföy yok</span></div>';
+      return;
+    }
+    const rets = PORTFOLIO.map(p => p.unrealized_return_pct).filter(v => v != null);
+    const avg = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : null;
+    const daysHeld = PORTFOLIO[0].days_held;
+    const daysLeft = Math.max(0, REBALANCE_DAYS - daysHeld);
+    const tiles = [
+      { label: 'Son Rebalance', value: PORTFOLIO[0].rebalance_date, sub: `${daysHeld} gün önce` },
+      { label: 'Hisse Sayısı', value: PORTFOLIO.length, sub: 'eşit ağırlık varsayımıyla' },
+      { label: 'Sepet Getirisi', value: avg == null ? '—' : (avg > 0 ? '+' : '') + avg.toFixed(1) + '%', sub: 'gerçekleşmemiş (unrealized)', cls: avg > 0 ? 'pos' : avg < 0 ? 'neg' : '' },
+      { label: 'Sonraki Rebalance', value: daysLeft + ' gün', sub: `~${REBALANCE_DAYS} günde bir` },
+    ];
+    el.innerHTML = tiles.map(t =>
+      `<div class="stat"><span class="stat-label">${t.label}</span><span class="stat-value ${t.cls || ''}">${t.value}</span><span class="stat-sub">${t.sub}</span></div>`
+    ).join('');
+  }
+
+  function renderPortfolio() {
+    renderPortfolioStats();
+
+    const tbody = document.getElementById('portfolio-tbody');
+    tbody.innerHTML = [...PORTFOLIO]
+      .sort((a, b) => (b.unrealized_return_pct ?? -999) - (a.unrealized_return_pct ?? -999))
+      .map(p => `
+      <tr>
+        <td class="ticker">${p.ticker}</td>
+        <td class="name">${p.name || ''}</td>
+        <td>${p.sector || ''}</td>
+        <td class="num">${p.rebalance_date}</td>
+        <td class="num">${fmtNum(p.entry_price, 2)}</td>
+        <td class="num">${fmtNum(p.current_price, 2)}</td>
+        <td class="num">${fmtPct(p.unrealized_return_pct)}</td>
+        <td class="num">${p.entry_score ?? '—'}</td>
+      </tr>`).join('');
+
+    const histTbody = document.getElementById('portfolio-history-tbody');
+    const histEmpty = document.getElementById('portfolio-history-empty');
+    if (!PORTFOLIO_HISTORY.length) {
+      histTbody.innerHTML = '';
+      histEmpty.style.display = 'block';
+    } else {
+      histEmpty.style.display = 'none';
+      histTbody.innerHTML = [...PORTFOLIO_HISTORY].reverse().map(h => `
+        <tr>
+          <td class="ticker">${h.ticker}</td>
+          <td class="num">${h.giris_tarihi}</td>
+          <td class="num">${h.cikis_tarihi}</td>
+          <td class="num">${fmtNum(h.entry_price, 2)}</td>
+          <td class="num">${fmtNum(h.exit_price, 2)}</td>
+          <td class="num">${fmtPct(h.getiri_pct)}</td>
+          <td class="num">${h.gun_sayisi ?? '—'}</td>
+        </tr>`).join('');
+    }
+  }
+
   renderStats();
   render();
+  renderPortfolio();
 </script>
 </body>
 </html>
 """
 
 
-def write_html_dashboard(rows, run_date_str, output_path: Path):
+def write_html_dashboard(rows, portfolio_holdings, portfolio_history, run_date_str, output_path: Path):
     """Skor + getiri verisini arama/filtre/sıralama özellikli, tek dosyalık
     bağımsız bir HTML sayfasına yazar (internet bağlantısı gerekmeden açılır,
-    yalnızca Google Fonts için ağ isteği yapar)."""
+    yalnızca Google Fonts için ağ isteği yapar). Ayrıca 5-6 hisselik, aylık
+    rebalance edilen model portföy sekmesini de gömer."""
     data_json = json.dumps(rows, ensure_ascii=False)
-    html = DASHBOARD_TEMPLATE.replace("__BIST_DATA__", data_json).replace("__RUN_DATE__", run_date_str)
+    portfolio_json = json.dumps(portfolio_holdings, ensure_ascii=False)
+    portfolio_history_json = json.dumps(portfolio_history, ensure_ascii=False)
+    html = (DASHBOARD_TEMPLATE
+            .replace("__BIST_DATA__", data_json)
+            .replace("__PORTFOLIO_DATA__", portfolio_json)
+            .replace("__PORTFOLIO_HISTORY__", portfolio_history_json)
+            .replace("__REBALANCE_DAYS__", str(PORTFOLIO_REBALANCE_DAYS))
+            .replace("__RUN_DATE__", run_date_str))
     output_path.write_text(html, encoding="utf-8")
     print(f"HTML panosu yazildi: {output_path}")
 
@@ -1271,9 +1552,11 @@ def git_publish(run_date_str):
     uyari basar (ilk push'un elle yapilmasi gerekebilir)."""
     import subprocess
     repo_dir = Path(__file__).resolve().parent
+    candidate_files = ["docs/index.html", "history.csv", "portfoy.csv", "portfoy_gecmis.csv"]
+    files_to_add = [f for f in candidate_files if (repo_dir / f).exists()]
     try:
         subprocess.run(
-            ["git", "add", "docs/index.html", "history.csv"],
+            ["git", "add"] + files_to_add,
             cwd=repo_dir, check=True, capture_output=True, text=True,
         )
         commit = subprocess.run(
@@ -1381,6 +1664,13 @@ def main():
     snapshot = {t: all_companies[t] for t in tickers}
     append_history(snapshot, run_date)
 
+    # Model portfoyu guncelle (ayda bir rebalance, PORTFOLIO_SIZE hisselik gercek takip)
+    portfolio_holdings, just_rebalanced = update_model_portfolio(rows, all_companies, run_date)
+    portfolio_history = load_portfolio_history()
+    if just_rebalanced:
+        print(f"\nModel portfoy yeniden olusturuldu ({PORTFOLIO_SIZE} hisse): "
+              f"{', '.join(h['ticker'] for h in portfolio_holdings)}")
+
     # Excel raporu yaz
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTPUT_DIR / f"BIST100_Model_Portfoy_{run_date.replace('-', '')}.xlsx"
@@ -1388,12 +1678,12 @@ def main():
 
     # HTML panosu yaz (arama/filtre/siralama ozellikli, tarayicida acilan tek dosya)
     html_path = OUTPUT_DIR / f"BIST100_Model_Portfoy_{run_date.replace('-', '')}.html"
-    write_html_dashboard(rows, run_date, html_path)
+    write_html_dashboard(rows, portfolio_holdings, portfolio_history, run_date, html_path)
 
     # GitHub Pages icin docs/index.html'i de guncelle (sabit URL, uzaktan erisim)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     docs_index = DOCS_DIR / "index.html"
-    write_html_dashboard(rows, run_date, docs_index)
+    write_html_dashboard(rows, portfolio_holdings, portfolio_history, run_date, docs_index)
 
     print("\n=== Tamamlandi ===")
     print(f"Excel raporu: {out_path}")

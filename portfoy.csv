@@ -1,0 +1,7 @@
+rebalance_date,ticker,name,sector,entry_price,entry_score
+2026-08-30,CCOLA,Coca-Cola İçecek A.Ş,Gıda ve İçecek,78.95,54
+2026-08-30,EREGL,Ereğli Demir Çelik,Ana Metal,38.7,50
+2026-08-30,KRDMD,Kardemir (D),Ana Metal,45.6,50
+2026-08-30,TUPRS,Tüpraş,"Kimya, Petrol, Plastik",380.0,50
+2026-08-30,GUBRF,Gübre Fabrikaları,"Kimya, Petrol, Plastik",484.5,45
+2026-08-30,TRENJ,TR Doğal Enerji Kaynakları,Madencilik,110.5,45
