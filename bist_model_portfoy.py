@@ -81,7 +81,7 @@ HISTORY_FILE = Path("./history.csv")
 DOCS_DIR = Path(__file__).resolve().parent / "docs"   # GitHub Pages buradan yayinlanir
 GIT_AUTO_PUBLISH = True    # True ise her calistirmada docs/index.html otomatik commit+push edilir
 
-AUTO_TOP_N_BY_MARKET_CAP = True    # True yaparsan BIST100_TICKERS yok sayılır
+AUTO_TOP_N_BY_MARKET_CAP = False   # True yaparsan BIST100_TICKERS yok sayılır
 TOP_N = 100
 
 # Skorlama eşikleri (KAZRISK/model-portfoy sohbetinde belirlenen kurallar)
@@ -95,19 +95,21 @@ REQUEST_DELAY_SEC = 0.4            # API'ye nazik davranmak icin istekler arasi 
 REQUEST_TIMEOUT_SEC = 20
 REQUEST_RETRIES = 3
 
-# BIST100 bilesenleri (2026 ortasi itibariyla yaklasik liste - ceyreklik guncelle!)
+# BIST100 bilesenleri - investing.com/indices/ise-100-components uzerinden alinip
+# bilancoveri.com sirket veritabaniyla dogrulandi (2026-08-30). Ucuncu parti
+# kaynak oldugu icin resmi Borsa Istanbul listesiyle birebir ayni olmayabilir;
+# "EIS" adli bir bilesen eslestirilemedi (99/100). Uc ayda bir gozden gecir.
 BIST100_TICKERS = [
-    "THYAO","TUPRS","EREGL","BIMAS","SASA","KCHOL","SAHOL","GARAN","AKBNK","FROTO",
-    "TOASO","PGSUS","TCELL","SISE","ASELS","ISCTR","HALKB","YKBNK","VAKBN","AKSA",
-    "ARCLK","ASTOR","AEFES","AGHOL","AKSEN","ALARK","ANHYT","ANSGR","AKGRT","AKFYE",
-    "AKCNS","BRSAN","BRYAT","BIOEN","BUCIM","CANTE","CCOLA","CIMSA","CWENE","DOAS",
-    "DOHOL","ECILC","EKGYO","ENJSA","ENKAI","EUPWR","EUREN","FENER","GESAN","GLYHO",
-    "GOLTS","GUBRF","GWIND","HEKTS","IPEKE","ISDMR","ISMEN","IZMDC","KARSN","KAYSE",
-    "KLSER","KMPUR","KONTR","KONYA","KORDS","KOZAA","KOZAL","KRDMD","MAVI","MGROS",
-    "MIATK","OTKAR","OYAKC","PETKM","PSGYO","QUAGR","REEDR","SAHOL","SASA","SDTTR",
-    "SISE","SKBNK","SMRTG","SOKM","TAVHL","TKFEN","TSKB","TTKOM","TTRAK","TUKAS",
-    "ULKER","VESBE","VESTL","YEOTK","YYLGD","ZOREN","ALTNY","BFREN","BRISA","CVKMD",
-    "DSTKF","ENERY","KLYPV","KTLEV","ODAS","TABGD",
+    "AEFES","AKBNK","AKSA","AKSEN","ALARK","ALTNY","ANSGR","ARCLK","ASELS","ASTOR",
+    "BALSU","BERA","BIMAS","BRSAN","BRYAT","BSOKE","BTCIM","CANTE","CCOLA","CIMSA",
+    "CVKMD","CWENE","DAPGM","DOAS","DOHOL","DSTKF","EFOR","EKGYO","ENERY","ENJSA",
+    "ENKAI","EREGL","ESEN","EUPWR","EUREN","FENER","FROTO","GARAN","GENIL","GESAN",
+    "GLRMK","GRSEL","GRTHO","GSRAY","GUBRF","HALKB","HEKTS","IEYHO","ISCTR","ISMEN",
+    "IZENR","KCHOL","KLRHO","KRDMD","KTLEV","KUYAS","MAGEN","MAVI","MGROS","MIATK",
+    "MPARK","OBAMS","ODAS","ODINE","OTKAR","OYAKC","PAHOL","PASEU","PATEK","PETKM",
+    "PGSUS","PSGYO","QUAGR","RALYH","REEDR","SAHOL","SARKY","SASA","SISE","SKBNK",
+    "SOKM","TAVHL","TCELL","THYAO","TKFEN","TOASO","TRALT","TRENJ","TRMET","TSKB",
+    "TTKOM","TUKAS","TUPRS","TURSG","ULKER","VAKBN","VESTL","YKBNK","ZOREN",
 ]
 BIST100_TICKERS = sorted(set(BIST100_TICKERS))  # tekilleştir
 
