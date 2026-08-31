@@ -1558,7 +1558,14 @@ def main():
     fon_turleri = fetch_fon_turleri()
     print(f"  -> {len(fon_turleri)} tür bulundu.\n")
 
-    bas_tarih = run_date - timedelta(days=LOOKBACK_DAYS)
+    # LOOKBACK_DAYS tam 30 gun geriye gider, ama "30 gun once" bir haftasonuna/tatile denk
+    # gelirse (o gun islem yoksa) ~1 Ay Getiri icin referans noktasi bulunamaz ve kod sessizce
+    # serideki EN ESKI noktaya (birkac gun daha kisa bir pencereye) duser. TEFAS API'nin izin
+    # verdigi ust sinir (31 gun) kadar +1 gun ekstra tampon cekerek bu durumun COGUNU (tek
+    # gunluk haftasonu/tatil komsulugu) onceden onluyoruz - riski/volatiliteyi etkilemez,
+    # cunku _pencere_risk_metrikleri zaten sadece hedef tarihten SONRAKI gunleri kullanir.
+    FETCH_TAMPON_GUN = 1
+    bas_tarih = run_date - timedelta(days=LOOKBACK_DAYS + FETCH_TAMPON_GUN)
     print(f"Tüm fonların {bas_tarih} - {run_date} arası zaman serisi çekiliyor (tek istek, biraz sürebilir)...")
     zaman_serisi, toplam_satir = fetch_tum_fonlar_zaman_serisi(bas_tarih, run_date)
     print(f"  -> {len(zaman_serisi)} fon, {toplam_satir} satır çekildi.\n")
