@@ -647,6 +647,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     --tier-weak-ink: #566B63;
     --tier-out-bg: rgba(181, 64, 44, 0.09);
     --tier-out-ink: #B5402C;
+    --star: #C8931A;
     --shadow: 0 1px 2px rgba(16, 35, 28, 0.06), 0 8px 24px -12px rgba(16, 35, 28, 0.18);
     --font-display: 'Fraunces', Georgia, serif;
     --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -678,6 +679,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       --tier-weak-ink: #93A79E;
       --tier-out-bg: rgba(227, 115, 99, 0.12);
       --tier-out-ink: #E37363;
+      --star: #F2C245;
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
     }
   }
@@ -706,6 +708,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     --tier-weak-ink: #93A79E;
     --tier-out-bg: rgba(227, 115, 99, 0.12);
     --tier-out-ink: #E37363;
+    --star: #F2C245;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   }
 
@@ -978,6 +981,21 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     color: var(--tier-out-ink);
   }
 
+  td.fav-cell { padding: 8px 6px; width: 30px; }
+  .fav-star {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px;
+    color: var(--ink-faint);
+    transition: color 0.15s, transform 0.1s;
+  }
+  .fav-star:hover { color: var(--star); transform: scale(1.15); }
+  .fav-star.active { color: var(--star); }
+  .fav-star:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+
   .empty-state {
     padding: 48px 20px;
     text-align: center;
@@ -1041,6 +1059,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       <input type="checkbox" id="veri-uyari-toggle">
       Sadece veri uyarısı olanlar
     </label>
+    <label class="toggle-chip" title="Favoriler bu tarayıcıda saklanır (localStorage) — başka cihaz/tarayıcıya taşınmaz.">
+      <input type="checkbox" id="favori-toggle">
+      ★ Sadece favorilerim
+    </label>
     <span class="result-count" id="result-count"></span>
   </section>
 
@@ -1067,6 +1089,19 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   document.getElementById('run-date').textContent = RUN_DATE;
   document.getElementById('fund-count-footer').textContent = DATA.length + ' fon tarandı';
 
+  const FAVORI_ANAHTAR = 'fonModelPortfoy_favoriler';
+  let favoriler;
+  try {
+    favoriler = new Set(JSON.parse(localStorage.getItem(FAVORI_ANAHTAR) || '[]'));
+  } catch (e) {
+    favoriler = new Set();
+  }
+  function favorileriKaydet() {
+    try {
+      localStorage.setItem(FAVORI_ANAHTAR, JSON.stringify([...favoriler]));
+    } catch (e) { /* ozel tarayici modu vb. - sessizce yut, favoriler bu oturumda calismaya devam eder */ }
+  }
+
   DATA.forEach(d => {
     d.risk_passed = d.risk_status === 'GEÇTİ';
     d.veri_uyari_var = !!(d.veri_uyarilari && d.veri_uyarilari.length);
@@ -1092,6 +1127,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   }
 
   const COLUMNS = [
+    { key: 'favori', label: '★', sort: (d) => favoriler.has(d.fonKodu) ? 1 : 0 },
     { key: 'fonKodu', label: 'Kod', sort: (d) => d.fonKodu },
     { key: 'fonUnvan', label: 'Fon Unvanı', sort: (d) => d.fonUnvan },
     { key: 'toplam_skor', label: 'Skor', num: true, sort: (d) => d.toplam_skor ?? -1 },
@@ -1193,6 +1229,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   const searchInput = document.getElementById('search');
   const riskToggle = document.getElementById('risk-toggle');
   const veriUyariToggle = document.getElementById('veri-uyari-toggle');
+  const favoriToggle = document.getElementById('favori-toggle');
   const tbody = document.getElementById('tbody');
   const emptyState = document.getElementById('empty-state');
   const resultCount = document.getElementById('result-count');
@@ -1214,6 +1251,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       { label: 'Ort. Akış/Büyüklük', value: avgFlow == null ? '—' : (avgFlow > 0 ? '+' : '') + avgFlow.toFixed(1) + '%', sub: '~30 günlük', cls: avgFlow > 0 ? 'pos' : avgFlow < 0 ? 'neg' : '' },
       { label: 'En Yüksek Skor', value: top ? top.fonKodu : '—', sub: top ? top.toplam_skor.toFixed(1) + ' puan' : '' },
       { label: 'Veri Uyarısı', value: uyarili.length, sub: uyarili.length ? 'kontrol et' : 'temiz', cls: uyarili.length ? 'neg' : 'pos' },
+      { label: 'Favorilerim', value: favoriler.size, sub: favoriler.size ? '★ ile gör' : 'yıldızla ekle' },
     ];
     document.getElementById('stats').innerHTML = tiles.map(t =>
       `<div class="stat"><span class="stat-label">${t.label}</span><span class="stat-value ${t.cls || ''}">${t.value}</span><span class="stat-sub">${t.sub}</span></div>`
@@ -1225,12 +1263,14 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     const tur = turSel.value;
     const onlyPassed = riskToggle.checked;
     const onlyFlagged = veriUyariToggle.checked;
+    const onlyFavori = favoriToggle.checked;
     const rangeKey = rangeKeySel.value;
     const rangeMin = rangeMinInput.value === '' ? null : parseFloat(rangeMinInput.value);
     const rangeMax = rangeMaxInput.value === '' ? null : parseFloat(rangeMaxInput.value);
     return DATA.filter(d => {
       if (onlyPassed && !d.risk_passed) return false;
       if (onlyFlagged && !d.veri_uyari_var) return false;
+      if (onlyFavori && !favoriler.has(d.fonKodu)) return false;
       if (tur && d.tur !== tur) return false;
       if (q && !(d.fonKodu.toLocaleLowerCase('tr').includes(q) || (d.fonUnvan || '').toLocaleLowerCase('tr').includes(q))) return false;
       if (rangeKey && (rangeMin != null || rangeMax != null)) {
@@ -1263,8 +1303,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       const tier = tierOf(d);
       const uyariAlan = uyariAlanlari(d);
       const wc = (key) => uyariAlan.has(key) ? ' cell-warn' : '';
+      const favoriDurum = favoriler.has(d.fonKodu);
       return `
       <tr class="row ${tier}">
+        <td class="fav-cell"><button class="fav-star ${favoriDurum ? 'active' : ''}" data-kod="${d.fonKodu}" title="${favoriDurum ? 'Favorilerden çıkar' : 'Favorilere ekle'}" aria-label="${favoriDurum ? 'Favorilerden çıkar' : 'Favorilere ekle'}">${favoriDurum ? '★' : '☆'}</button></td>
         <td class="ticker${wc('fonKodu')}">${d.fonKodu}</td>
         <td class="name">${d.fonUnvan || ''}<span class="sector">${d.tur || ''}</span></td>
         <td class="num"><div class="score-cell"><span class="score-num">${d.toplam_skor != null ? d.toplam_skor.toFixed(1) : '—'}</span><span class="score-track"><span class="score-fill" style="width:${Math.max(0, Math.min(100, d.toplam_skor ?? 0))}%"></span></span></div></td>
@@ -1301,6 +1343,17 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   turSel.addEventListener('change', render);
   riskToggle.addEventListener('change', render);
   veriUyariToggle.addEventListener('change', render);
+  favoriToggle.addEventListener('change', render);
+
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.fav-star');
+    if (!btn) return;
+    const kod = btn.dataset.kod;
+    if (favoriler.has(kod)) favoriler.delete(kod); else favoriler.add(kod);
+    favorileriKaydet();
+    render();
+    renderStats();
+  });
 
   renderStats();
   render();
