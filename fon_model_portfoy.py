@@ -360,6 +360,84 @@ def percentile_rank(value, all_values_sorted):
 
 
 # =============================================================================
+# VERİ KALİTESİ KONTROLÜ
+# =============================================================================
+#
+# Her calistirmada otomatik calisan bir "mantik kontrolu" katmani. TEFAS'in
+# kendi sitesiyle tek tek manuel karsilastirma yapmanin yerini almaz (o hala
+# en guvenilir dogrulama yontemidir), ama HER calistirmada, HER fon icin,
+# bariz/imkansiz degerleri (negatif buyukluk, asiri hareket, bayat veri,
+# tekrar eden fon kodu vb.) otomatik yakalar - boylece hatali bir veri sessizce
+# rapora sizmez, gorunur bir uyari olarak isaretlenir.
+
+VERI_KALITE_ESIKLERI = {
+    "getiri_1g_mutlak_maks": 40.0,    # % - tek gunde bu kadar buyuk hareket suphelidir
+    "getiri_pct_mutlak_maks": 150.0,  # % - ~1 ayda bu kadar buyuk hareket suphelidir
+    "akis_oran_mutlak_maks": 500.0,   # % - ~1 ayda buyuklugunun bu katini akis olarak degistirmek suphelidir
+    "veri_bayat_gun": 5,              # son veri noktasi run_date'den bu kadar eskiyse "guncel degil" sayilir
+}
+
+
+def validate_data_quality(ham_sonuclar, run_date: date):
+    """Her fonun HAM verisini (skorlama ONCESI) basit mantik kontrollerinden
+    gecirir. Skorlama modelinin isabetini degil, ALTINDAKI VERININ makul olup
+    olmadigini kontrol eder. Her satirin 'veri_uyarilari' alanina bulunan
+    sorunlarin listesini yazar (bos liste = sorun yok), ayrica sadece sorunlu
+    fonlarin ozetini bir liste olarak doner."""
+    esik = VERI_KALITE_ESIKLERI
+
+    kod_sayaci = defaultdict(int)
+    for r in ham_sonuclar:
+        kod_sayaci[r["fonKodu"]] += 1
+
+    ozet = []
+    for r in ham_sonuclar:
+        uyarilar = []
+
+        if r.get("guncel_fiyat") is None or r["guncel_fiyat"] <= 0:
+            uyarilar.append("Geçersiz güncel fiyat")
+
+        pb = r.get("guncel_portfoy_buyuklugu")
+        if pb is not None and pb < 0:
+            uyarilar.append("Negatif portföy büyüklüğü")
+
+        ks = r.get("guncel_kisi_sayisi")
+        if ks is not None and ks < 0:
+            uyarilar.append("Negatif yatırımcı sayısı")
+
+        g1g = r.get("getiri_1g")
+        if g1g is not None and abs(g1g) > esik["getiri_1g_mutlak_maks"]:
+            uyarilar.append(f"Günlük getiri aşırı: {g1g:+.1f}%")
+
+        g1a = r.get("getiri_pct")
+        if g1a is not None and abs(g1a) > esik["getiri_pct_mutlak_maks"]:
+            uyarilar.append(f"~1 Ay getiri aşırı: {g1a:+.1f}%")
+
+        akis = r.get("akis_oran_pct")
+        if akis is not None and abs(akis) > esik["akis_oran_mutlak_maks"]:
+            uyarilar.append(f"Akış oranı aşırı: {akis:+.1f}%")
+
+        vol = r.get("volatilite_1a")
+        if vol is not None and vol < 0:
+            uyarilar.append("Negatif volatilite (hesaplama hatası)")
+
+        son_tarih_str = r.get("son_tarih")
+        if son_tarih_str:
+            son_tarih = date.fromisoformat(son_tarih_str)
+            if (run_date - son_tarih).days > esik["veri_bayat_gun"]:
+                uyarilar.append(f"Veri güncel değil (son veri: {son_tarih_str})")
+
+        if kod_sayaci[r["fonKodu"]] > 1:
+            uyarilar.append("Fon kodu taramada birden fazla kez geçiyor")
+
+        r["veri_uyarilari"] = uyarilar
+        if uyarilar:
+            ozet.append({"fonKodu": r["fonKodu"], "fonUnvan": r.get("fonUnvan"), "uyarilar": uyarilar})
+
+    return ozet
+
+
+# =============================================================================
 # SKOR GEÇMİŞİ (günlük/haftalık skor değişimini takip etmek için)
 # =============================================================================
 
@@ -911,6 +989,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       <input type="checkbox" id="risk-toggle" checked>
       Sadece riski geçenler
     </label>
+    <label class="toggle-chip">
+      <input type="checkbox" id="veri-uyari-toggle">
+      Sadece veri uyarısı olanlar
+    </label>
     <span class="result-count" id="result-count"></span>
   </section>
 
@@ -937,7 +1019,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   document.getElementById('run-date').textContent = RUN_DATE;
   document.getElementById('fund-count-footer').textContent = DATA.length + ' fon tarandı';
 
-  DATA.forEach(d => { d.risk_passed = d.risk_status === 'GEÇTİ'; });
+  DATA.forEach(d => {
+    d.risk_passed = d.risk_status === 'GEÇTİ';
+    d.veri_uyari_var = !!(d.veri_uyarilari && d.veri_uyarilari.length);
+  });
 
   function tierOf(d) {
     if (!d.risk_passed) return 'out';
@@ -984,6 +1069,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     { key: 'kisi_sayisi', label: 'Yatırımcı', num: true, sort: (d) => d.kisi_sayisi ?? -Infinity },
     { key: 'sharpe_1a', label: 'Sharpe-Benzeri (1A)', num: true, sort: (d) => d.sharpe_1a ?? -Infinity },
     { key: 'akis_z', label: 'Akış Z-Skoru', num: true, sort: (d) => d.akis_z ?? -Infinity },
+    { key: 'veri_uyarilari', label: 'Veri Uyarısı', sort: (d) => (d.veri_uyarilari || []).length },
   ];
 
   let sortKey = 'toplam_skor';
@@ -1033,6 +1119,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
   const searchInput = document.getElementById('search');
   const riskToggle = document.getElementById('risk-toggle');
+  const veriUyariToggle = document.getElementById('veri-uyari-toggle');
   const tbody = document.getElementById('tbody');
   const emptyState = document.getElementById('empty-state');
   const resultCount = document.getElementById('result-count');
@@ -1044,6 +1131,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     const withFlow = passed.filter(d => d.akis_oran_pct != null);
     const avgFlow = withFlow.length ? withFlow.reduce((a, d) => a + d.akis_oran_pct, 0) / withFlow.length : null;
     const top = [...passed].sort((a, b) => (b.toplam_skor ?? -1) - (a.toplam_skor ?? -1))[0];
+    const uyarili = DATA.filter(d => d.veri_uyari_var);
 
     const tiles = [
       { label: 'Taranan Fon', value: DATA.length, sub: 'TEFAS' },
@@ -1052,6 +1140,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       { label: 'İzlemede', value: watch.length, sub: 'skor 40–69' },
       { label: 'Ort. Akış/Büyüklük', value: avgFlow == null ? '—' : (avgFlow > 0 ? '+' : '') + avgFlow.toFixed(1) + '%', sub: '~30 günlük', cls: avgFlow > 0 ? 'pos' : avgFlow < 0 ? 'neg' : '' },
       { label: 'En Yüksek Skor', value: top ? top.fonKodu : '—', sub: top ? top.toplam_skor.toFixed(1) + ' puan' : '' },
+      { label: 'Veri Uyarısı', value: uyarili.length, sub: uyarili.length ? 'kontrol et' : 'temiz', cls: uyarili.length ? 'neg' : 'pos' },
     ];
     document.getElementById('stats').innerHTML = tiles.map(t =>
       `<div class="stat"><span class="stat-label">${t.label}</span><span class="stat-value ${t.cls || ''}">${t.value}</span><span class="stat-sub">${t.sub}</span></div>`
@@ -1062,11 +1151,13 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     const q = searchInput.value.trim().toLocaleLowerCase('tr');
     const tur = turSel.value;
     const onlyPassed = riskToggle.checked;
+    const onlyFlagged = veriUyariToggle.checked;
     const rangeKey = rangeKeySel.value;
     const rangeMin = rangeMinInput.value === '' ? null : parseFloat(rangeMinInput.value);
     const rangeMax = rangeMaxInput.value === '' ? null : parseFloat(rangeMaxInput.value);
     return DATA.filter(d => {
       if (onlyPassed && !d.risk_passed) return false;
+      if (onlyFlagged && !d.veri_uyari_var) return false;
       if (tur && d.tur !== tur) return false;
       if (q && !(d.fonKodu.toLocaleLowerCase('tr').includes(q) || (d.fonUnvan || '').toLocaleLowerCase('tr').includes(q))) return false;
       if (rangeKey && (rangeMin != null || rangeMax != null)) {
@@ -1124,6 +1215,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <td class="num">${d.kisi_sayisi != null ? d.kisi_sayisi.toLocaleString('tr-TR') : '—'}</td>
         <td class="num">${fmtNum(d.sharpe_1a, 2)}</td>
         <td class="num">${fmtNum(d.akis_z, 2)}</td>
+        <td class="warn-cell">${d.veri_uyari_var ? `<span class="chip out" title="${(d.veri_uyarilari || []).join('; ').replace(/"/g, '&quot;')}">⚠ ${d.veri_uyarilari.length}</span>` : '—'}</td>
       </tr>`;
     }).join('');
   }
@@ -1131,6 +1223,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   searchInput.addEventListener('input', render);
   turSel.addEventListener('change', render);
   riskToggle.addEventListener('change', render);
+  veriUyariToggle.addEventListener('change', render);
 
   renderStats();
   render();
@@ -1162,6 +1255,7 @@ def write_html_dashboard(rows, run_date_str, output_path: Path):
             "portfoy_buyuklugu_mn": (r["guncel_portfoy_buyuklugu"] / 1_000_000) if r["guncel_portfoy_buyuklugu"] else None,
             "kisi_sayisi": r["guncel_kisi_sayisi"],
             "risk_status": r["risk_status"],
+            "veri_uyarilari": r.get("veri_uyarilari") or [],
         })
     data_json = json.dumps(dashboard_rows, ensure_ascii=False)
     html = DASHBOARD_TEMPLATE.replace("__FON_DATA__", data_json).replace("__RUN_DATE__", run_date_str)
@@ -1212,6 +1306,7 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.formatting.rule import CellIsRule
+    from openpyxl.utils import get_column_letter
 
     FONT = "Arial"
     wb = Workbook()
@@ -1233,21 +1328,6 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    ws.merge_cells("A1:Z1")
-    ws["A1"] = f"TEFAS FON MODEL PORTFÖY — Tarama ({run_date_str})"
-    ws["A1"].font = title_font
-    ws["A1"].fill = fill_navy
-    ws["A1"].alignment = center
-    ws.row_dimensions[1].height = 26
-
-    ws.merge_cells("A2:Z2")
-    ws["A2"] = ("UYARI: Yatırım tavsiyesi değildir, sistematik bir tarama aracıdır. "
-                "Veri kaynağı: TEFAS (tefas.gov.tr). Karar sizindir.")
-    ws["A2"].font = warn_font
-    ws["A2"].fill = fill_red
-    ws["A2"].alignment = center
-    ws.row_dimensions[2].height = 20
-
     headers = ["Sıra", "Kod", "Fon Unvanı", "Tür", "Toplam Skor",
                "Katman A (Getiri)", "Katman B (Akış)", "Katman C (Risk)",
                "Skor Değ. (1G)", "Skor Değ. (1H)",
@@ -1256,11 +1336,28 @@ def write_excel_report(rows, run_date_str, output_path: Path):
                "Günlük Akış %", "Haftalık Akış %", "Akış/Büyüklük % (1A)",
                "Volatilite % (1A)", "Maks. Düşüş % (1A)", "Yoğunlaşma (Bin TL/Kişi)",
                "Net Akış (Mn TL)", "Portföy Büyüklüğü (Mn TL)", "Yatırımcı Sayısı", "Risk Filtresi",
-               "Sharpe-Benzeri (1A)", "Akış Z-Skoru (Kendi Geçmişi)"]
+               "Sharpe-Benzeri (1A)", "Akış Z-Skoru (Kendi Geçmişi)", "Veri Uyarısı"]
     widths = [6, 8, 36, 17, 11, 13, 12, 12, 11, 11, 10, 11, 11, 10, 10, 10, 11, 11, 13, 12, 13, 15, 13, 16, 12, 20,
-              14, 16]
+              14, 16, 40]
+    last_col = get_column_letter(len(headers))
+
+    ws.merge_cells(f"A1:{last_col}1")
+    ws["A1"] = f"TEFAS FON MODEL PORTFÖY — Tarama ({run_date_str})"
+    ws["A1"].font = title_font
+    ws["A1"].fill = fill_navy
+    ws["A1"].alignment = center
+    ws.row_dimensions[1].height = 26
+
+    ws.merge_cells(f"A2:{last_col}2")
+    ws["A2"] = ("UYARI: Yatırım tavsiyesi değildir, sistematik bir tarama aracıdır. "
+                "Veri kaynağı: TEFAS (tefas.gov.tr). Karar sizindir.")
+    ws["A2"].font = warn_font
+    ws["A2"].fill = fill_red
+    ws["A2"].alignment = center
+    ws.row_dimensions[2].height = 20
+
     for i, (h, w) in enumerate(zip(headers, widths)):
-        col = chr(ord("A") + i) if i < 26 else "A" + chr(ord("A") + i - 26)
+        col = get_column_letter(i + 1)
         ws.column_dimensions[col].width = w
         c = ws.cell(row=4, column=i + 1, value=h)
         c.font = header_font
@@ -1306,12 +1403,13 @@ def write_excel_report(rows, run_date_str, output_path: Path):
             r["risk_status"],
             round(r["sharpe_1a"], 2) if r.get("sharpe_1a") is not None else None,
             round(r["akis_z"], 2) if r.get("akis_z") is not None else None,
+            "; ".join(r.get("veri_uyarilari") or []) or "—",
         ]
         for col, v in enumerate(vals, 1):
             cell = ws.cell(row=r_idx, column=col, value=v)
             cell.font = normal_font
             cell.border = border_all
-            cell.alignment = left if col in (3, 26) else center
+            cell.alignment = left if col in (3, 26, 29) else center
         r_idx += 1
 
     last_row = r_idx - 1
@@ -1335,11 +1433,16 @@ def write_excel_report(rows, run_date_str, output_path: Path):
             f"Z5:Z{last_row}",
             CellIsRule(operator="notEqual", formula=['"GEÇTİ"'],
                        fill=PatternFill("solid", fgColor="FF7C80")))
+        veri_uyari_col = get_column_letter(len(headers))
+        ws.conditional_formatting.add(
+            f"{veri_uyari_col}5:{veri_uyari_col}{last_row}",
+            CellIsRule(operator="notEqual", formula=['"—"'],
+                       fill=PatternFill("solid", fgColor="FFE699")))
 
     ws.freeze_panes = "A5"
 
     note_row = last_row + 3
-    ws.merge_cells(f"A{note_row}:Z{note_row}")
+    ws.merge_cells(f"A{note_row}:{get_column_letter(len(headers))}{note_row}")
     ws[f"A{note_row}"] = (
         "Not: Toplam Skor = ağırlıklı ortalama(Katman A %45, Katman B %20, Katman C %35), sonra kendi "
         "türü içinde tekrar yüzdelik dilime çevrilir (dağılımı düz tutmak için). Ağırlıklar, risk-ayarlı "
@@ -1355,7 +1458,10 @@ def write_excel_report(rows, run_date_str, output_path: Path):
         f"{AKIS_Z_MIN_GOZLEM} günlük geçmiş birikene kadar boş gelir. Skor Değ. (1G/1H), Toplam Skor'un "
         "bir/yedi gün önceki değerine göre değişimidir — ilk birkaç çalıştırmada boş gelir. Net Akış, "
         "tedavüldeki pay sayısı değişiminden tahmin edilir. 3/6/12 aylık getiriler, o tarihlerin "
-        "etrafındaki en yakın işlem gününün fiyatına dayanır."
+        "etrafındaki en yakın işlem gününün fiyatına dayanır. Veri Uyarısı, her çalıştırmada otomatik "
+        "çalışan bir mantık kontrolüdür (negatif/imkânsız değerler, aşırı büyük hareketler, bayat veri, "
+        "tekrar eden fon kodu) — skorlamayı etkilemez, sadece altındaki HAM verinin makul olup olmadığını "
+        "işaretler; boş (—) olması verinin kesin doğru olduğunu garanti etmez, sadece bariz hataları eler."
     )
     ws[f"A{note_row}"].font = Font(name=FONT, size=9, italic=True, color="7F7F7F")
     ws[f"A{note_row}"].alignment = left
@@ -1401,6 +1507,18 @@ def main():
         })
 
     print(f"  -> {len(ham_sonuclar)} fon için metrik hesaplandı.\n")
+
+    print("Veri kalitesi kontrol ediliyor...")
+    veri_uyarilari = validate_data_quality(ham_sonuclar, run_date)
+    if veri_uyarilari:
+        print(f"  -> {len(veri_uyarilari)} fonda veri uyarısı bulundu (detaylar Excel/panonun son sütununda):")
+        for u in veri_uyarilari[:5]:
+            print(f"     {u['fonKodu']}: {'; '.join(u['uyarilar'])}")
+        if len(veri_uyarilari) > 5:
+            print(f"     ... ve {len(veri_uyarilari) - 5} fon daha.")
+    else:
+        print("  -> Uyarı yok, tüm veriler makul aralıkta.")
+    print()
 
     print("Uzun vadeli getiri için referans fiyatlar çekiliyor (3 ay, 6 ay, 1 yıl)...")
     referans_fiyatlar = {}
