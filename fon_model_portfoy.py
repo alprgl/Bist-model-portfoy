@@ -38,6 +38,7 @@ KULLANIM
     python3 fon_model_portfoy.py
 """
 
+import calendar
 import csv
 import json
 import time
@@ -76,10 +77,32 @@ SHARPE_VOLATILITE_TABAN = 0.01   # sharpe-benzeri oranda sifira bolmeyi onlemek 
 AKIS_Z_MIN_GOZLEM = 10            # akis z-skoru icin fonun kendi gecmisinde en az kac gun veri gerekli
 
 # TEFAS API tek istekte 1 aydan uzun tarih araligina izin vermiyor, bu yuzden uzun
-# vadeli getiriler icin (3/6/12 ay) o tarihlerin etrafinda DAR birer "referans fiyat"
+# vadeli getiriler icin (1/3/6/12 ay) o tarihlerin etrafinda DAR birer "referans fiyat"
 # penceresi ayrica cekilir (tum fonlar icin tek istek, hafif).
-UZUN_VADE_DONEMLERI = [("3a", 90), ("6a", 180), ("1y", 365)]
-REFERANS_PENCERE_GUN = 6   # hedef tarihin etrafinda kac gunluk pencereye bakilacak (tatil/haftasonu icin pay)
+#
+# ONEMLI: TEFAS'in kendi sitesi (tefas.gov.tr) "Getiri Bilgisi" panelindeki 1/3/6/12
+# aylik degerleri SABIT GUN SAYISI (30/90/180/365) ile degil, TAKVIM AYI ile hesaplar
+# (orn. "1 Ay" = bugunden tam 1 takvim ayi once, ayni gun) VE hedef tarih islem gunu
+# degilse (haftasonu/tatil) EN YAKIN SONRAKI islem gununu kullanir (geriye degil,
+# ILERIYE yuvarlar). Bu, TEFAS'in kendi web sitesindeki fonFiyatBilgiGetir uc noktasi
+# (periyod=1/3/6/12) network istekleri incelenerek DOGRULANMISTIR - MTK ornegi icin
+# 4 donemin de (1a: 31 Tem, 3a: 1 Haz [31 May Pazar->ileri], 6a: 2 Mar [28 Sub
+# Cumartesi->ileri], 1y: 1 Eyl 2025 [31 Agu 2025 Pazar->ileri]) referans tarihi
+# birebir eslesmistir. Asagidaki UZUN_VADE_DONEMLERI ve n_ay_once()/fetch_referans_fiyatlar()
+# bu kurali uyguluyor.
+UZUN_VADE_DONEMLERI = [("1a", 1), ("3a", 3), ("6a", 6), ("1y", 12)]  # (etiket, kac takvim ayi once)
+REFERANS_PENCERE_GUN = 6   # hedef tarihten ILERIYE dogru kac gunluk pencereye bakilacak (tatil/haftasonu icin pay)
+
+
+def n_ay_once(tarih: date, ay_sayisi: int) -> date:
+    """tarih'ten ay_sayisi kadar takvim ayi once, AYNI GUNU doner. Hedef ayda o gun
+    yoksa (orn. 31 Agustos - 6 ay = 31 Subat yok) ayin SON gunune sabitlenir (28/29
+    Subat gibi). TEFAS'in kendi "1/3/6/12 Aylik" getiri hesabiyla ayni mantik."""
+    toplam_ay = tarih.year * 12 + (tarih.month - 1) - ay_sayisi
+    yil, ay = divmod(toplam_ay, 12)
+    ay += 1
+    son_gun = calendar.monthrange(yil, ay)[1]
+    return date(yil, ay, min(tarih.day, son_gun))
 
 REQUEST_TIMEOUT_SEC = 30
 REQUEST_HEADERS = {
@@ -180,13 +203,15 @@ def fetch_tum_fonlar_zaman_serisi(bas_tarih: date, bit_tarih: date):
 
 
 def fetch_referans_fiyatlar(hedef_tarih: date, pencere_gun: int = REFERANS_PENCERE_GUN):
-    """hedef_tarih etrafinda DAR bir pencerede (TEFAS 1 aydan uzun araligi reddettigi
-    icin) tum fonlarin en yakin fiyatini tek istekte ceker. Doner: {fonKodu: fiyat}."""
-    bas_tarih = hedef_tarih - timedelta(days=pencere_gun)
+    """hedef_tarih itibariyle (TEFAS'in kendi kuraliyla BIREBIR ayni: hedef_tarih islem
+    gunu degilse EN YAKIN SONRAKI islem gunu) tum fonlarin referans fiyatini tek istekte
+    ceker. Pencere ILERIYE dogru acilir (TEFAS 1 aydan uzun araligi reddettigi icin dar
+    tutulur). Doner: {fonKodu: fiyat}."""
+    bit_tarih = hedef_tarih + timedelta(days=pencere_gun)
     payload = {
         "fonTipi": "YAT", "fonKodu": None, "aramaMetni": None, "fonTurKod": None,
         "fonGrubu": None, "sfonTurKod": None,
-        "basTarih": bas_tarih.strftime("%Y%m%d"), "bitTarih": hedef_tarih.strftime("%Y%m%d"),
+        "basTarih": hedef_tarih.strftime("%Y%m%d"), "bitTarih": bit_tarih.strftime("%Y%m%d"),
         "basSira": 1, "bitSira": 60000, "fonTurAciklama": None, "dil": "TR", "kurucuKod": None,
     }
     payload_json = tefas_post(FON_GENEL_URL, payload)
@@ -198,7 +223,7 @@ def fetch_referans_fiyatlar(hedef_tarih: date, pencere_gun: int = REFERANS_PENCE
             continue
         t = datetime.strptime(r["tarih"], "%Y-%m-%d").date()
         mevcut = en_yakin.get(r["fonKodu"])
-        if mevcut is None or t > mevcut[0]:
+        if mevcut is None or t < mevcut[0]:   # EN ERKEN (hedef_tarih'e en yakin ILERI) tarihi tut
             en_yakin[r["fonKodu"]] = (t, r["fiyat"])
     return {kod: fiyat for kod, (_, fiyat) in en_yakin.items()}
 
@@ -1527,8 +1552,11 @@ def write_excel_report(rows, run_date_str, output_path: Path):
         "göre kaç standart sapma uzakta olduğunu gösterir (pozitif = normalden fazla para giriyor); en az "
         f"{AKIS_Z_MIN_GOZLEM} günlük geçmiş birikene kadar boş gelir. Skor Değ. (1G/1H), Toplam Skor'un "
         "bir/yedi gün önceki değerine göre değişimidir — ilk birkaç çalıştırmada boş gelir. Net Akış, "
-        "tedavüldeki pay sayısı değişiminden tahmin edilir. 3/6/12 aylık getiriler, o tarihlerin "
-        "etrafındaki en yakın işlem gününün fiyatına dayanır. Veri Uyarısı, her çalıştırmada otomatik "
+        "tedavüldeki pay sayısı değişiminden tahmin edilir. ~1 Ay/3 Ay/6 Ay/1 Yıl getirileri, TEFAS'ın "
+        "kendi \"Getiri Bilgisi\" hesabıyla BİREBİR eşleşecek şekilde hesaplanır: bugünden tam 1/3/6/12 "
+        "takvim ayı önceki AYNI GÜN referans alınır (kısa aylarda ayın son gününe sabitlenir), o gün işlem "
+        "günü değilse EN YAKIN SONRAKI işlem gününün fiyatı kullanılır (TEFAS'ın kendi kuralı — geriye "
+        "değil ileriye yuvarlanır). Veri Uyarısı, her çalıştırmada otomatik "
         "çalışan bir mantık kontrolüdür (negatif/imkânsız değerler, aşırı büyük hareketler, bayat veri, "
         "tekrar eden fon kodu) — skorlamayı etkilemez, sadece altındaki HAM verinin makul olup olmadığını "
         "işaretler; boş (—) olması verinin kesin doğru olduğunu garanti etmez, sadece bariz hataları eler. "
@@ -1601,10 +1629,11 @@ def main():
         print("  -> Uyarı yok, tüm veriler makul aralıkta.")
     print()
 
-    print("Uzun vadeli getiri için referans fiyatlar çekiliyor (3 ay, 6 ay, 1 yıl)...")
+    print("Referans fiyatlar çekiliyor (1/3/6/12 ay — TEFAS'ın kendi 'Getiri Bilgisi' hesabıyla "
+          "BİREBİR eşleşecek şekilde takvim ayı + ileri yuvarlama)...")
     referans_fiyatlar = {}
-    for etiket, gun_sayisi in UZUN_VADE_DONEMLERI:
-        hedef = run_date - timedelta(days=gun_sayisi)
+    for etiket, ay_sayisi in UZUN_VADE_DONEMLERI:
+        hedef = n_ay_once(run_date, ay_sayisi)
         referans_fiyatlar[etiket] = fetch_referans_fiyatlar(hedef)
         print(f"  {etiket} ({hedef}): {len(referans_fiyatlar[etiket])} fon için referans fiyat bulundu.")
         time.sleep(1.0)
@@ -1612,10 +1641,14 @@ def main():
     for r in ham_sonuclar:
         for etiket, _ in UZUN_VADE_DONEMLERI:
             ref_fiyat = referans_fiyatlar[etiket].get(r["fonKodu"])
-            r[f"getiri_{etiket}"] = (
+            getiri = (
                 (r["guncel_fiyat"] - ref_fiyat) / ref_fiyat * 100.0
                 if ref_fiyat else None
             )
+            # "1a" -> getiri_pct alanini TEFAS-birebir degerle EZER (compute_fund_metrics'teki
+            # LOOKBACK_DAYS-bazli tahmin sadece Akis/Buyukluk hesabinda kullanilmaya devam eder).
+            alan_adi = "getiri_pct" if etiket == "1a" else f"getiri_{etiket}"
+            r[alan_adi] = getiri
     print()
 
     print("Akış z-skoru (fonun kendi geçmişine göre) hesaplanıyor...")

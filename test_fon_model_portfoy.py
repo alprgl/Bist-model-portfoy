@@ -28,6 +28,7 @@ from fon_model_portfoy import (
     compute_akis_z,
     compute_skor_degisim,
     validate_data_quality,
+    n_ay_once,
     SHARPE_VOLATILITE_TABAN,
     AKIS_Z_MIN_GOZLEM,
     RISK_MIN_PORTFOY_BUYUKLUK,
@@ -232,6 +233,33 @@ class TestComputeSkorDegisim(unittest.TestCase):
 
     def test_bos_gecmis_none(self):
         self.assertIsNone(compute_skor_degisim([], 70.0, date(2026, 1, 11), 1))
+
+
+class TestNAyOnce(unittest.TestCase):
+    # Bu degerler TEFAS'in kendi sitesindeki (tefas.gov.tr) fonFiyatBilgiGetir uc
+    # noktasindan (periyod=1/3/6/12) DOGRUDAN dogrulanmistir - bkz. UZUN_VADE_DONEMLERI
+    # ustundeki yorum. MTK fonu icin 31.08.2026 "bugun" alinarak: 1a->31 Tem (Cuma,
+    # islem gunu), 3a->1 Haz (31 May Pazar->ileri), 6a->2 Mar (28 Sub Cmt->ileri),
+    # 1y->1 Eyl 2025 (31 Agu 2025 Pazar->ileri) TEFAS'ta gorulen degerlerle eslesmisti.
+    def test_normal_ay_farki(self):
+        self.assertEqual(n_ay_once(date(2026, 8, 31), 1), date(2026, 7, 31))
+        self.assertEqual(n_ay_once(date(2026, 8, 31), 3), date(2026, 5, 31))
+        self.assertEqual(n_ay_once(date(2026, 8, 31), 12), date(2025, 8, 31))
+
+    def test_kisa_aya_sabitlenir(self):
+        # 31 Agustos - 6 ay = "31 Subat" yok -> Subat'in son gunune (2026 artik yil
+        # degil, 28 Subat) sabitlenir.
+        self.assertEqual(n_ay_once(date(2026, 8, 31), 6), date(2026, 2, 28))
+        # 31 Mayis - 1 ay = "31 Nisan" yok (Nisan 30 gun) -> 30 Nisan'a sabitlenir.
+        self.assertEqual(n_ay_once(date(2026, 5, 31), 1), date(2026, 4, 30))
+
+    def test_artik_yil_subat(self):
+        # 2028 artik yil (Subat 29 gun).
+        self.assertEqual(n_ay_once(date(2028, 8, 31), 6), date(2028, 2, 29))
+
+    def test_yil_donumu(self):
+        self.assertEqual(n_ay_once(date(2026, 1, 15), 1), date(2025, 12, 15))
+        self.assertEqual(n_ay_once(date(2026, 1, 15), 13), date(2024, 12, 15))
 
 
 class TestValidateDataQuality(unittest.TestCase):
