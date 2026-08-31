@@ -248,6 +248,51 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .range-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 4px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elevated);
+  }
+  .range-field.active { border-color: var(--accent); }
+  .range-field select {
+    border: none;
+    background: transparent;
+    padding: 6px 4px;
+    max-width: 160px;
+  }
+  .range-field input[type="number"] {
+    width: 62px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-sunken);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .range-field input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .range-sep { color: var(--ink-faint); font-size: 12px; }
+  .range-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .range-clear:hover { background: var(--bg-sunken); color: var(--ink); }
+
   .table-wrap {
     flex: 1;
     min-height: 0;
@@ -361,6 +406,13 @@
       <input id="search" type="text" placeholder="Kod veya fon adı ara…" autocomplete="off">
     </div>
     <select id="tur-filter"></select>
+    <div class="range-field" id="range-field">
+      <select id="range-key"></select>
+      <input id="range-min" type="number" step="any" placeholder="Min" inputmode="decimal">
+      <span class="range-sep">–</span>
+      <input id="range-max" type="number" step="any" placeholder="Maks" inputmode="decimal">
+      <button id="range-clear" class="range-clear" type="button" title="Aralık filtresini temizle" aria-label="Aralık filtresini temizle">×</button>
+    </div>
     <label class="toggle-chip">
       <input type="checkbox" id="risk-toggle" checked>
       Sadece riski geçenler
@@ -460,6 +512,31 @@
   const turler = [...new Set(DATA.map(d => d.tur).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
   turSel.innerHTML = '<option value="">Tüm türler</option>' + turler.map(s => `<option value="${s}">${s}</option>`).join('');
 
+  const rangeField = document.getElementById('range-field');
+  const rangeKeySel = document.getElementById('range-key');
+  const rangeMinInput = document.getElementById('range-min');
+  const rangeMaxInput = document.getElementById('range-max');
+  const rangeClearBtn = document.getElementById('range-clear');
+  const numericCols = COLUMNS.filter(c => c.num);
+  rangeKeySel.innerHTML = '<option value="">Aralık filtresi…</option>' +
+    numericCols.map(c => `<option value="${c.key}">${c.label}</option>`).join('');
+
+  function updateRangeState() {
+    const active = !!rangeKeySel.value && (rangeMinInput.value !== '' || rangeMaxInput.value !== '');
+    rangeField.classList.toggle('active', active);
+  }
+  [rangeKeySel, rangeMinInput, rangeMaxInput].forEach(el => {
+    el.addEventListener('input', () => { updateRangeState(); render(); });
+    el.addEventListener('change', () => { updateRangeState(); render(); });
+  });
+  rangeClearBtn.addEventListener('click', () => {
+    rangeKeySel.value = '';
+    rangeMinInput.value = '';
+    rangeMaxInput.value = '';
+    updateRangeState();
+    render();
+  });
+
   const searchInput = document.getElementById('search');
   const riskToggle = document.getElementById('risk-toggle');
   const tbody = document.getElementById('tbody');
@@ -491,10 +568,19 @@
     const q = searchInput.value.trim().toLocaleLowerCase('tr');
     const tur = turSel.value;
     const onlyPassed = riskToggle.checked;
+    const rangeKey = rangeKeySel.value;
+    const rangeMin = rangeMinInput.value === '' ? null : parseFloat(rangeMinInput.value);
+    const rangeMax = rangeMaxInput.value === '' ? null : parseFloat(rangeMaxInput.value);
     return DATA.filter(d => {
       if (onlyPassed && !d.risk_passed) return false;
       if (tur && d.tur !== tur) return false;
       if (q && !(d.fonKodu.toLocaleLowerCase('tr').includes(q) || (d.fonUnvan || '').toLocaleLowerCase('tr').includes(q))) return false;
+      if (rangeKey && (rangeMin != null || rangeMax != null)) {
+        const val = d[rangeKey];
+        if (val == null) return false;
+        if (rangeMin != null && val < rangeMin) return false;
+        if (rangeMax != null && val > rangeMax) return false;
+      }
       return true;
     });
   }
