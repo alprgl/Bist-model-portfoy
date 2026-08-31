@@ -32,6 +32,7 @@ from fon_model_portfoy import (
     AKIS_Z_MIN_GOZLEM,
     RISK_MIN_PORTFOY_BUYUKLUK,
     RISK_MIN_KISI_SAYISI,
+    UYARI_ALAN_ESLEME,
 )
 
 
@@ -274,6 +275,23 @@ class TestValidateDataQuality(unittest.TestCase):
         validate_data_quality(satirlar, self.RUN_DATE)
         for satir in satirlar:
             self.assertIn("Fon kodu taramada birden fazla kez geçiyor", satir["veri_uyarilari"])
+
+    def test_uyari_alan_esleme_hicbir_uyariyi_gozden_kacirmiyor(self):
+        # UYARI_ALAN_ESLEME (Excel/pano hucre-vurgulama haritasi), validate_data_quality'nin
+        # URETTIGI GERCEK mesajlarla senkron kalmali - biri mesaj metnini degistirip
+        # esleme listesini guncellemeyi unutursa bu test kirilir.
+        satir = {
+            "fonKodu": "CCC", "fonUnvan": "Bozuk Fon",
+            "guncel_fiyat": -1.0, "guncel_portfoy_buyuklugu": -100.0,
+            "guncel_kisi_sayisi": -5, "getiri_1g": 100.0, "getiri_pct": 500.0,
+            "akis_oran_pct": 1000.0, "volatilite_1a": -1.0,
+            "son_tarih": (self.RUN_DATE - timedelta(days=10)).isoformat(),
+        }
+        validate_data_quality([satir], self.RUN_DATE)
+        on_ekler = [on_ek for on_ek, _, _ in UYARI_ALAN_ESLEME]
+        for uyari in satir["veri_uyarilari"]:
+            self.assertTrue(any(uyari.startswith(on_ek) for on_ek in on_ekler),
+                             f"'{uyari}' icin UYARI_ALAN_ESLEME'de eslesen bir on-ek yok")
 
 
 if __name__ == "__main__":

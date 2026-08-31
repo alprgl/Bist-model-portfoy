@@ -377,6 +377,23 @@ VERI_KALITE_ESIKLERI = {
     "veri_bayat_gun": 5,              # son veri noktasi run_date'den bu kadar eskiyse "guncel degil" sayilir
 }
 
+# Her uyari turunun HANGI sutunda gosterilecegini belirler - boylece "Veri
+# Uyarisi" metnini okumak yerine, sorunlu HUCRENIN kendisi Excel'de/panoda
+# vurgulanabilir. (excel_sutun, dashboard_alan) - write_excel_report ve
+# DASHBOARD_TEMPLATE bu listeyi referans alir, JS tarafinda ayni liste elle
+# senkron tutulur (bkz. DASHBOARD_TEMPLATE icindeki UYARI_ALAN_ESLEME).
+UYARI_ALAN_ESLEME = [
+    ("Geçersiz güncel fiyat", "Güncel Fiyat", "guncel_fiyat"),
+    ("Negatif portföy büyüklüğü", "Portföy Büyüklüğü (Mn TL)", "portfoy_buyuklugu_mn"),
+    ("Negatif yatırımcı sayısı", "Yatırımcı Sayısı", "kisi_sayisi"),
+    ("Günlük getiri aşırı", "Günlük Getiri %", "getiri_1g"),
+    ("~1 Ay getiri aşırı", "~1 Ay Getiri %", "getiri_pct"),
+    ("Akış oranı aşırı", "Akış/Büyüklük % (1A)", "akis_oran_pct"),
+    ("Negatif volatilite", "Volatilite % (1A)", "volatilite_1a"),
+    ("Veri güncel değil", "Son Veri Tarihi", "son_tarih"),
+    ("Fon kodu taramada birden fazla kez geçiyor", "Kod", "fonKodu"),
+]
+
 
 def validate_data_quality(ham_sonuclar, run_date: date):
     """Her fonun HAM verisini (skorlama ONCESI) basit mantik kontrollerinden
@@ -930,6 +947,12 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .chip.weak { background: var(--tier-weak-bg); color: var(--tier-weak-ink); }
   .chip.out { background: var(--tier-out-bg); color: var(--tier-out-ink); }
 
+  td.cell-warn {
+    background: var(--tier-out-bg);
+    box-shadow: inset 0 0 0 1px var(--tier-out-ink);
+    color: var(--tier-out-ink);
+  }
+
   .empty-state {
     padding: 48px 20px;
     text-align: center;
@@ -1069,8 +1092,33 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     { key: 'kisi_sayisi', label: 'Yatırımcı', num: true, sort: (d) => d.kisi_sayisi ?? -Infinity },
     { key: 'sharpe_1a', label: 'Sharpe-Benzeri (1A)', num: true, sort: (d) => d.sharpe_1a ?? -Infinity },
     { key: 'akis_z', label: 'Akış Z-Skoru', num: true, sort: (d) => d.akis_z ?? -Infinity },
+    { key: 'guncel_fiyat', label: 'Güncel Fiyat', num: true, sort: (d) => d.guncel_fiyat ?? -Infinity },
+    { key: 'son_tarih', label: 'Son Veri', sort: (d) => d.son_tarih || '' },
     { key: 'veri_uyarilari', label: 'Veri Uyarısı', sort: (d) => (d.veri_uyarilari || []).length },
   ];
+
+  // UYARI_ALAN_ESLEME: fon_model_portfoy.py'deki ayni isimli Python listesiyle
+  // ELLE SENKRON tutulur - hangi uyari on-eki hangi sutun HUCRESINI vurgulayacak.
+  const UYARI_ALAN_ESLEME = [
+    ['Geçersiz güncel fiyat', 'guncel_fiyat'],
+    ['Negatif portföy büyüklüğü', 'portfoy_buyuklugu_mn'],
+    ['Negatif yatırımcı sayısı', 'kisi_sayisi'],
+    ['Günlük getiri aşırı', 'getiri_1g'],
+    ['~1 Ay getiri aşırı', 'getiri_pct'],
+    ['Akış oranı aşırı', 'akis_oran_pct'],
+    ['Negatif volatilite', 'volatilite_1a'],
+    ['Veri güncel değil', 'son_tarih'],
+    ['Fon kodu taramada birden fazla kez geçiyor', 'fonKodu'],
+  ];
+
+  function uyariAlanlari(d) {
+    const set = new Set();
+    (d.veri_uyarilari || []).forEach(u => {
+      const hit = UYARI_ALAN_ESLEME.find(([onEk]) => u.startsWith(onEk));
+      if (hit) set.add(hit[1]);
+    });
+    return set;
+  }
 
   let sortKey = 'toplam_skor';
   let sortDir = -1;
@@ -1188,9 +1236,11 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
     tbody.innerHTML = rows.map(d => {
       const tier = tierOf(d);
+      const uyariAlan = uyariAlanlari(d);
+      const wc = (key) => uyariAlan.has(key) ? ' cell-warn' : '';
       return `
       <tr class="row ${tier}">
-        <td class="ticker">${d.fonKodu}</td>
+        <td class="ticker${wc('fonKodu')}">${d.fonKodu}</td>
         <td class="name">${d.fonUnvan || ''}<span class="sector">${d.tur || ''}</span></td>
         <td class="num"><div class="score-cell"><span class="score-num">${d.toplam_skor != null ? d.toplam_skor.toFixed(1) : '—'}</span><span class="score-track"><span class="score-fill" style="width:${Math.max(0, Math.min(100, d.toplam_skor ?? 0))}%"></span></span></div></td>
         <td class="num">${d.katman_a_getiri != null ? d.katman_a_getiri.toFixed(1) : '—'}</td>
@@ -1198,23 +1248,25 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <td class="num">${d.katman_c_risk != null ? d.katman_c_risk.toFixed(1) : '—'}</td>
         <td class="num">${fmtPct(d.skor_degisim_1g)}</td>
         <td class="num">${fmtPct(d.skor_degisim_1h)}</td>
-        <td class="num">${fmtPct(d.getiri_1g)}</td>
+        <td class="num${wc('getiri_1g')}">${fmtPct(d.getiri_1g)}</td>
         <td class="num">${fmtPct(d.getiri_1h)}</td>
-        <td class="num">${fmtPct(d.getiri_pct)}</td>
+        <td class="num${wc('getiri_pct')}">${fmtPct(d.getiri_pct)}</td>
         <td class="num">${fmtPct(d.getiri_3a)}</td>
         <td class="num">${fmtPct(d.getiri_6a)}</td>
         <td class="num">${fmtPct(d.getiri_1y)}</td>
         <td class="num">${fmtPct(d.akis_oran_1g)}</td>
         <td class="num">${fmtPct(d.akis_oran_1h)}</td>
-        <td class="num">${fmtPct(d.akis_oran_pct)}</td>
-        <td class="num">${fmtNum(d.volatilite_1a, 2)}</td>
+        <td class="num${wc('akis_oran_pct')}">${fmtPct(d.akis_oran_pct)}</td>
+        <td class="num${wc('volatilite_1a')}">${fmtNum(d.volatilite_1a, 2)}</td>
         <td class="num">${fmtPct(d.max_dusus_1a)}</td>
         <td class="num">${fmtNum(d.yogunlasma_bin_tl, 1)}</td>
         <td class="num">${fmtNum(d.net_akis_mn, 1)}</td>
-        <td class="num">${fmtNum(d.portfoy_buyuklugu_mn, 0)}</td>
-        <td class="num">${d.kisi_sayisi != null ? d.kisi_sayisi.toLocaleString('tr-TR') : '—'}</td>
+        <td class="num${wc('portfoy_buyuklugu_mn')}">${fmtNum(d.portfoy_buyuklugu_mn, 0)}</td>
+        <td class="num${wc('kisi_sayisi')}">${d.kisi_sayisi != null ? d.kisi_sayisi.toLocaleString('tr-TR') : '—'}</td>
         <td class="num">${fmtNum(d.sharpe_1a, 2)}</td>
         <td class="num">${fmtNum(d.akis_z, 2)}</td>
+        <td class="num${wc('guncel_fiyat')}">${fmtNum(d.guncel_fiyat, 4)}</td>
+        <td class="num${wc('son_tarih')}">${d.son_tarih || '—'}</td>
         <td class="warn-cell">${d.veri_uyari_var ? `<span class="chip out" title="${(d.veri_uyarilari || []).join('; ').replace(/"/g, '&quot;')}">⚠ ${d.veri_uyarilari.length}</span>` : '—'}</td>
       </tr>`;
     }).join('');
@@ -1255,6 +1307,8 @@ def write_html_dashboard(rows, run_date_str, output_path: Path):
             "portfoy_buyuklugu_mn": (r["guncel_portfoy_buyuklugu"] / 1_000_000) if r["guncel_portfoy_buyuklugu"] else None,
             "kisi_sayisi": r["guncel_kisi_sayisi"],
             "risk_status": r["risk_status"],
+            "guncel_fiyat": r.get("guncel_fiyat"),
+            "son_tarih": r.get("son_tarih"),
             "veri_uyarilari": r.get("veri_uyarilari") or [],
         })
     data_json = json.dumps(dashboard_rows, ensure_ascii=False)
@@ -1336,9 +1390,12 @@ def write_excel_report(rows, run_date_str, output_path: Path):
                "Günlük Akış %", "Haftalık Akış %", "Akış/Büyüklük % (1A)",
                "Volatilite % (1A)", "Maks. Düşüş % (1A)", "Yoğunlaşma (Bin TL/Kişi)",
                "Net Akış (Mn TL)", "Portföy Büyüklüğü (Mn TL)", "Yatırımcı Sayısı", "Risk Filtresi",
-               "Sharpe-Benzeri (1A)", "Akış Z-Skoru (Kendi Geçmişi)", "Veri Uyarısı"]
+               "Sharpe-Benzeri (1A)", "Akış Z-Skoru (Kendi Geçmişi)", "Güncel Fiyat", "Son Veri Tarihi",
+               "Veri Uyarısı"]
     widths = [6, 8, 36, 17, 11, 13, 12, 12, 11, 11, 10, 11, 11, 10, 10, 10, 11, 11, 13, 12, 13, 15, 13, 16, 12, 20,
-              14, 16, 40]
+              14, 16, 12, 13, 40]
+    header_to_col = {h: i + 1 for i, h in enumerate(headers)}
+    fill_uyari_hucre = PatternFill("solid", fgColor="FFE699")
     last_col = get_column_letter(len(headers))
 
     ws.merge_cells(f"A1:{last_col}1")
@@ -1403,13 +1460,26 @@ def write_excel_report(rows, run_date_str, output_path: Path):
             r["risk_status"],
             round(r["sharpe_1a"], 2) if r.get("sharpe_1a") is not None else None,
             round(r["akis_z"], 2) if r.get("akis_z") is not None else None,
+            round(r["guncel_fiyat"], 6) if r.get("guncel_fiyat") is not None else None,
+            r.get("son_tarih"),
             "; ".join(r.get("veri_uyarilari") or []) or "—",
         ]
         for col, v in enumerate(vals, 1):
             cell = ws.cell(row=r_idx, column=col, value=v)
             cell.font = normal_font
             cell.border = border_all
-            cell.alignment = left if col in (3, 26, 29) else center
+            cell.alignment = left if col in (3, 26, len(headers)) else center
+
+        # Veri Uyarisi metnini okumaya gerek kalmadan, SORUNUN OLDUGU HUCRENIN
+        # kendisini vurgula (bkz. UYARI_ALAN_ESLEME) - "nerede" sorusuna Excel
+        # icinde dogrudan cevap verir.
+        for uyari in (r.get("veri_uyarilari") or []):
+            for on_ek, sutun_adi, _ in UYARI_ALAN_ESLEME:
+                if uyari.startswith(on_ek):
+                    hedef_col = header_to_col.get(sutun_adi)
+                    if hedef_col:
+                        ws.cell(row=r_idx, column=hedef_col).fill = fill_uyari_hucre
+                    break
         r_idx += 1
 
     last_row = r_idx - 1
@@ -1461,7 +1531,11 @@ def write_excel_report(rows, run_date_str, output_path: Path):
         "etrafındaki en yakın işlem gününün fiyatına dayanır. Veri Uyarısı, her çalıştırmada otomatik "
         "çalışan bir mantık kontrolüdür (negatif/imkânsız değerler, aşırı büyük hareketler, bayat veri, "
         "tekrar eden fon kodu) — skorlamayı etkilemez, sadece altındaki HAM verinin makul olup olmadığını "
-        "işaretler; boş (—) olması verinin kesin doğru olduğunu garanti etmez, sadece bariz hataları eler."
+        "işaretler; boş (—) olması verinin kesin doğru olduğunu garanti etmez, sadece bariz hataları eler. "
+        "Bir uyarı tetiklendiğinde, o uyarının kaynağı olan HÜCRE (örn. aşırı akış → Akış/Büyüklük % "
+        "hücresi, bayat veri → Son Veri Tarihi hücresi) sarı renkle ayrıca vurgulanır — metni okumadan "
+        "\"nerede\" sorusuna doğrudan cevap verir. Güncel Fiyat ve Son Veri Tarihi sütunları sadece bu "
+        "kontrol için eklenmiştir, başka bir hesaplamada kullanılmaz."
     )
     ws[f"A{note_row}"].font = Font(name=FONT, size=9, italic=True, color="7F7F7F")
     ws[f"A{note_row}"].alignment = left
