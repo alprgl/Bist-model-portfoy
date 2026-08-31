@@ -28,6 +28,7 @@ KULLANIM
     python3 fon_model_portfoy.py
 """
 
+import csv
 import json
 import time
 import urllib.request
@@ -45,6 +46,7 @@ FON_GENEL_URL = f"{API_BASE}/fonGnlBlgSiraliGetir"
 FON_TUR_URL = f"{API_BASE}/fonTurGetir"
 
 OUTPUT_DIR = Path("./ciktilar")
+FON_SKOR_GECMIS_FILE = Path("./fon_skor_gecmis.csv")  # skor degisimini takip etmek icin
 DOCS_DIR = Path(__file__).resolve().parent / "docs"   # GitHub Pages buradan yayinlanir
 GIT_AUTO_PUBLISH = True    # True ise her calistirmada docs/fon.html otomatik commit+push edilir
 
@@ -154,8 +156,42 @@ def fetch_tum_fonlar_zaman_serisi(bas_tarih: date, bit_tarih: date):
 # METRİK HESAPLAMA
 # =============================================================================
 
+def _pencere_metrikleri(series, gun_sayisi):
+    """series icinde, en son noktadan gun_sayisi takvim gunu geriye giden en yakin
+    noktayi bulup, o noktadan bugune: getiri % ve net akis (TL + oran %) hesaplar.
+    Yetersiz veri varsa (None, None, None) doner."""
+    son = series[-1]
+    hedef_tarih = son["tarih"] - timedelta(days=gun_sayisi)
+
+    nokta, nokta_idx = None, None
+    for i, pt in enumerate(series):
+        if pt["tarih"] <= hedef_tarih:
+            nokta, nokta_idx = pt, i
+        else:
+            break
+
+    if nokta is None or nokta_idx == len(series) - 1 or not nokta.get("fiyat"):
+        return None, None, None
+
+    getiri_pct = (son["fiyat"] - nokta["fiyat"]) / nokta["fiyat"] * 100.0
+
+    net_akis_tl = 0.0
+    for i in range(nokta_idx + 1, len(series)):
+        onceki, simdiki = series[i - 1], series[i]
+        pay_degisim = simdiki["tedPaySayisi"] - onceki["tedPaySayisi"]
+        net_akis_tl += pay_degisim * simdiki["fiyat"]
+
+    akis_oran_pct = None
+    if nokta.get("portfoyBuyukluk") and nokta["portfoyBuyukluk"] > 0:
+        akis_oran_pct = net_akis_tl / nokta["portfoyBuyukluk"] * 100.0
+
+    return getiri_pct, net_akis_tl, akis_oran_pct
+
+
 def compute_fund_metrics(series):
     """series: tarihe gore artan sirali gunluk kayitlar (bkz. fetch_tum_fonlar_zaman_serisi).
+    Gunluk (1g), haftalik (1h) ve ~LOOKBACK_DAYS gunluk (1a) pencereler icin ayri ayri
+    getiri/akis hesaplar - hepsi zaten cekilmis tek seriden turetilir, ekstra istek gerekmez.
     Doner: dict veya None (yetersiz veri)."""
     if len(series) < 2:
         return None
@@ -164,17 +200,20 @@ def compute_fund_metrics(series):
     if not ilk["fiyat"] or ilk["fiyat"] <= 0:
         return None
 
-    getiri_pct = (son["fiyat"] - ilk["fiyat"]) / ilk["fiyat"] * 100.0
+    getiri_1a, net_akis_1a, akis_oran_1a = _pencere_metrikleri(series, LOOKBACK_DAYS)
+    getiri_1h, net_akis_1h, akis_oran_1h = _pencere_metrikleri(series, 7)
+    getiri_1g, net_akis_1g, akis_oran_1g = _pencere_metrikleri(series, 1)
 
-    net_akis_tl = 0.0
-    for i in range(1, len(series)):
-        onceki, simdiki = series[i - 1], series[i]
-        pay_degisim = simdiki["tedPaySayisi"] - onceki["tedPaySayisi"]
-        net_akis_tl += pay_degisim * simdiki["fiyat"]
-
-    akis_oran_pct = None
-    if ilk.get("portfoyBuyukluk") and ilk["portfoyBuyukluk"] > 0:
-        akis_oran_pct = net_akis_tl / ilk["portfoyBuyukluk"] * 100.0
+    # 1 aylik pencere, seride en az iki nokta oldugu surece serinin ilk noktasina
+    # kadar geriye gitmeyi garanti eder (asagidaki fallback ile).
+    if getiri_1a is None:
+        getiri_1a = (son["fiyat"] - ilk["fiyat"]) / ilk["fiyat"] * 100.0
+        net_akis_1a = 0.0
+        for i in range(1, len(series)):
+            onceki, simdiki = series[i - 1], series[i]
+            net_akis_1a += (simdiki["tedPaySayisi"] - onceki["tedPaySayisi"]) * simdiki["fiyat"]
+        akis_oran_1a = (net_akis_1a / ilk["portfoyBuyukluk"] * 100.0
+                         if ilk.get("portfoyBuyukluk") else None)
 
     kisi_degisim = None
     if ilk.get("kisiSayisi") is not None and son.get("kisiSayisi") is not None:
@@ -185,9 +224,9 @@ def compute_fund_metrics(series):
         "guncel_fiyat": son["fiyat"],
         "guncel_portfoy_buyuklugu": son.get("portfoyBuyukluk"),
         "guncel_kisi_sayisi": son.get("kisiSayisi"),
-        "getiri_pct": getiri_pct,
-        "net_akis_tl": net_akis_tl,
-        "akis_oran_pct": akis_oran_pct,
+        "getiri_pct": getiri_1a, "net_akis_tl": net_akis_1a, "akis_oran_pct": akis_oran_1a,
+        "getiri_1g": getiri_1g, "net_akis_1g": net_akis_1g, "akis_oran_1g": akis_oran_1g,
+        "getiri_1h": getiri_1h, "net_akis_1h": net_akis_1h, "akis_oran_1h": akis_oran_1h,
         "kisi_degisim": kisi_degisim,
         "veri_gun_sayisi": len(series),
         "ilk_tarih": ilk["tarih"].isoformat(),
@@ -216,6 +255,67 @@ def percentile_rank(value, all_values_sorted):
     kucuk_sayisi = sum(1 for v in all_values_sorted if v < value)
     esit_sayisi = sum(1 for v in all_values_sorted if v == value)
     return (kucuk_sayisi + 0.5 * esit_sayisi) / n * 100.0
+
+
+# =============================================================================
+# SKOR GEÇMİŞİ (günlük/haftalık skor değişimini takip etmek için)
+# =============================================================================
+
+def load_fon_skor_gecmis():
+    """fon_skor_gecmis.csv'yi {fonKodu: [{'tarih': date, 'toplam_skor': float}, ...]}
+    seklinde okur (tarihe gore artan sirali). Dosya yoksa bos dict doner."""
+    if not FON_SKOR_GECMIS_FILE.exists():
+        return {}
+    gecmis = defaultdict(list)
+    with open(FON_SKOR_GECMIS_FILE, "r", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("toplam_skor") in (None, "", "None"):
+                continue
+            gecmis[row["fonKodu"]].append({
+                "tarih": datetime.strptime(row["tarih"], "%Y-%m-%d").date(),
+                "toplam_skor": float(row["toplam_skor"]),
+            })
+    for fon_kodu in gecmis:
+        gecmis[fon_kodu].sort(key=lambda x: x["tarih"])
+    return gecmis
+
+
+def append_fon_skor_gecmis(ham_sonuclar, run_date: date):
+    """Bu calistirmanin skorlarini fon_skor_gecmis.csv'ye ekler. Ayni gun icin
+    zaten kayit varsa tekrar eklemez (ayni gun birden fazla calistirma icin)."""
+    file_exists = FON_SKOR_GECMIS_FILE.exists()
+    if file_exists:
+        with open(FON_SKOR_GECMIS_FILE, "r", encoding="utf-8", newline="") as f:
+            mevcut_tarihler = {row["tarih"] for row in csv.DictReader(f)}
+        if run_date.isoformat() in mevcut_tarihler:
+            print(f"  fon_skor_gecmis.csv: {run_date} tarihli kayit zaten var, tekrar eklenmedi.")
+            return
+    with open(FON_SKOR_GECMIS_FILE, "a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["tarih", "fonKodu", "toplam_skor"])
+        for r in ham_sonuclar:
+            writer.writerow([run_date.isoformat(), r["fonKodu"],
+                              r["toplam_skor"] if r["toplam_skor"] is not None else ""])
+    print(f"fon_skor_gecmis.csv guncellendi (+{len(ham_sonuclar)} satir, tarih={run_date}).")
+
+
+def compute_skor_degisim(gecmis_for_fon, bugunku_skor, run_date: date, gun_sayisi: int):
+    """gecmis_for_fon icinde run_date'den gun_sayisi takvim gunu once (veya en yakin
+    onceki) kayitli skoru bulup, bugunku_skor ile arasindaki farki doner. Yetersiz
+    gecmis varsa None doner."""
+    if bugunku_skor is None or not gecmis_for_fon:
+        return None
+    hedef_tarih = run_date - timedelta(days=gun_sayisi)
+    nokta = None
+    for kayit in gecmis_for_fon:
+        if kayit["tarih"] <= hedef_tarih:
+            nokta = kayit
+        else:
+            break
+    if nokta is None:
+        return None
+    return bugunku_skor - nokta["toplam_skor"]
 
 
 # =============================================================================
@@ -481,7 +581,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     background: var(--bg-elevated);
     box-shadow: var(--shadow);
   }
-  table { border-collapse: collapse; width: 100%; min-width: 1080px; }
+  table { border-collapse: collapse; width: 100%; min-width: 1560px; }
   thead th {
     position: sticky; top: 0; z-index: 2;
     background: var(--bg-sunken);
@@ -640,7 +740,13 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     { key: 'fonKodu', label: 'Kod', sort: (d) => d.fonKodu },
     { key: 'fonUnvan', label: 'Fon Unvanı', sort: (d) => d.fonUnvan },
     { key: 'toplam_skor', label: 'Skor', num: true, sort: (d) => d.toplam_skor ?? -1 },
+    { key: 'skor_degisim_1g', label: 'Skor Değ. 1G', num: true, sort: (d) => d.skor_degisim_1g ?? -Infinity },
+    { key: 'skor_degisim_1h', label: 'Skor Değ. 1H', num: true, sort: (d) => d.skor_degisim_1h ?? -Infinity },
+    { key: 'getiri_1g', label: 'Günlük Getiri', num: true, sort: (d) => d.getiri_1g ?? -Infinity },
+    { key: 'getiri_1h', label: 'Haftalık Getiri', num: true, sort: (d) => d.getiri_1h ?? -Infinity },
     { key: 'getiri_pct', label: '~1 Ay Getiri', num: true, sort: (d) => d.getiri_pct ?? -Infinity },
+    { key: 'akis_oran_1g', label: 'Günlük Akış', num: true, sort: (d) => d.akis_oran_1g ?? -Infinity },
+    { key: 'akis_oran_1h', label: 'Haftalık Akış', num: true, sort: (d) => d.akis_oran_1h ?? -Infinity },
     { key: 'akis_oran_pct', label: 'Akış/Büyüklük', num: true, sort: (d) => d.akis_oran_pct ?? -Infinity },
     { key: 'net_akis_mn', label: 'Net Akış (Mn TL)', num: true, sort: (d) => d.net_akis_mn ?? -Infinity },
     { key: 'portfoy_buyuklugu_mn', label: 'Büyüklük (Mn TL)', num: true, sort: (d) => d.portfoy_buyuklugu_mn ?? -Infinity },
@@ -729,7 +835,13 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <td class="ticker">${d.fonKodu}</td>
         <td class="name">${d.fonUnvan || ''}<span class="sector">${d.tur || ''}</span></td>
         <td class="num"><div class="score-cell"><span class="score-num">${d.toplam_skor != null ? d.toplam_skor.toFixed(1) : '—'}</span><span class="score-track"><span class="score-fill" style="width:${Math.max(0, Math.min(100, d.toplam_skor ?? 0))}%"></span></span></div></td>
+        <td class="num">${fmtPct(d.skor_degisim_1g)}</td>
+        <td class="num">${fmtPct(d.skor_degisim_1h)}</td>
+        <td class="num">${fmtPct(d.getiri_1g)}</td>
+        <td class="num">${fmtPct(d.getiri_1h)}</td>
         <td class="num">${fmtPct(d.getiri_pct)}</td>
+        <td class="num">${fmtPct(d.akis_oran_1g)}</td>
+        <td class="num">${fmtPct(d.akis_oran_1h)}</td>
         <td class="num">${fmtPct(d.akis_oran_pct)}</td>
         <td class="num">${fmtNum(d.net_akis_mn, 1)}</td>
         <td class="num">${fmtNum(d.portfoy_buyuklugu_mn, 0)}</td>
@@ -758,7 +870,10 @@ def write_html_dashboard(rows, run_date_str, output_path: Path):
         dashboard_rows.append({
             "fonKodu": r["fonKodu"], "fonUnvan": r["fonUnvan"], "tur": r["tur_aciklama"],
             "toplam_skor": r["toplam_skor"],
-            "getiri_pct": r["getiri_pct"], "akis_oran_pct": r["akis_oran_pct"],
+            "skor_degisim_1g": r.get("skor_degisim_1g"), "skor_degisim_1h": r.get("skor_degisim_1h"),
+            "getiri_1g": r.get("getiri_1g"), "getiri_1h": r.get("getiri_1h"), "getiri_pct": r["getiri_pct"],
+            "akis_oran_1g": r.get("akis_oran_1g"), "akis_oran_1h": r.get("akis_oran_1h"),
+            "akis_oran_pct": r["akis_oran_pct"],
             "net_akis_mn": (r["net_akis_tl"] / 1_000_000) if r["net_akis_tl"] is not None else None,
             "portfoy_buyuklugu_mn": (r["guncel_portfoy_buyuklugu"] / 1_000_000) if r["guncel_portfoy_buyuklugu"] else None,
             "kisi_sayisi": r["guncel_kisi_sayisi"],
@@ -776,7 +891,7 @@ def git_publish(run_date_str):
     basarisiz olursa scripti durdurmadan uyari basar."""
     import subprocess
     repo_dir = Path(__file__).resolve().parent
-    candidate_files = ["docs/fon.html"]
+    candidate_files = ["docs/fon.html", "fon_skor_gecmis.csv"]
     files_to_add = [f for f in candidate_files if (repo_dir / f).exists()]
     try:
         subprocess.run(
@@ -834,14 +949,14 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    ws.merge_cells("A1:L1")
+    ws.merge_cells("A1:Q1")
     ws["A1"] = f"TEFAS FON MODEL PORTFÖY — Tarama ({run_date_str})"
     ws["A1"].font = title_font
     ws["A1"].fill = fill_navy
     ws["A1"].alignment = center
     ws.row_dimensions[1].height = 26
 
-    ws.merge_cells("A2:L2")
+    ws.merge_cells("A2:Q2")
     ws["A2"] = ("UYARI: Yatırım tavsiyesi değildir, sistematik bir tarama aracıdır. "
                 "Veri kaynağı: TEFAS (tefas.gov.tr). Karar sizindir.")
     ws["A2"].font = warn_font
@@ -849,10 +964,11 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     ws["A2"].alignment = center
     ws.row_dimensions[2].height = 20
 
-    headers = ["Sıra", "Kod", "Fon Unvanı", "Tür", "Toplam Skor", "Getiri Percentile",
-               "Akış Percentile", "~1 Ay Getiri %", "Net Akış (Mn TL)", "Akış/Büyüklük %",
-               "Portföy Büyüklüğü (Mn TL)", "Yatırımcı Sayısı", "Risk Filtresi"]
-    widths = [6, 8, 40, 20, 12, 14, 12, 12, 14, 14, 16, 14, 24]
+    headers = ["Sıra", "Kod", "Fon Unvanı", "Tür", "Toplam Skor", "Skor Değ. (1G)", "Skor Değ. (1H)",
+               "Günlük Getiri %", "Haftalık Getiri %", "~1 Ay Getiri %",
+               "Günlük Akış %", "Haftalık Akış %", "Akış/Büyüklük % (1A)",
+               "Net Akış (Mn TL)", "Portföy Büyüklüğü (Mn TL)", "Yatırımcı Sayısı", "Risk Filtresi"]
+    widths = [6, 8, 38, 18, 11, 12, 12, 11, 12, 11, 11, 12, 15, 13, 16, 12, 22]
     for i, (h, w) in enumerate(zip(headers, widths)):
         col = chr(ord("A") + i) if i < 26 else "A" + chr(ord("A") + i - 26)
         ws.column_dimensions[col].width = w
@@ -877,11 +993,15 @@ def write_excel_report(rows, run_date_str, output_path: Path):
         vals = [
             i + 1, r["fonKodu"], r["fonUnvan"], r["tur_aciklama"],
             round(r["toplam_skor"], 1) if r["toplam_skor"] is not None else None,
-            round(r["getiri_percentile"], 1) if r["getiri_percentile"] is not None else None,
-            round(r["akis_percentile"], 1) if r["akis_percentile"] is not None else None,
+            round(r["skor_degisim_1g"], 1) if r.get("skor_degisim_1g") is not None else None,
+            round(r["skor_degisim_1h"], 1) if r.get("skor_degisim_1h") is not None else None,
+            round(r["getiri_1g"], 2) if r.get("getiri_1g") is not None else None,
+            round(r["getiri_1h"], 2) if r.get("getiri_1h") is not None else None,
             round(r["getiri_pct"], 2) if r["getiri_pct"] is not None else None,
-            round(r["net_akis_tl"] / 1_000_000, 2) if r["net_akis_tl"] is not None else None,
+            round(r["akis_oran_1g"], 2) if r.get("akis_oran_1g") is not None else None,
+            round(r["akis_oran_1h"], 2) if r.get("akis_oran_1h") is not None else None,
             round(r["akis_oran_pct"], 2) if r["akis_oran_pct"] is not None else None,
+            round(r["net_akis_tl"] / 1_000_000, 2) if r["net_akis_tl"] is not None else None,
             round(r["guncel_portfoy_buyuklugu"] / 1_000_000, 1) if r["guncel_portfoy_buyuklugu"] else None,
             r["guncel_kisi_sayisi"],
             r["risk_status"],
@@ -890,7 +1010,7 @@ def write_excel_report(rows, run_date_str, output_path: Path):
             cell = ws.cell(row=r_idx, column=col, value=v)
             cell.font = normal_font
             cell.border = border_all
-            cell.alignment = left if col in (3, 13) else center
+            cell.alignment = left if col in (3, 17) else center
         r_idx += 1
 
     last_row = r_idx - 1
@@ -903,19 +1023,28 @@ def write_excel_report(rows, run_date_str, output_path: Path):
             f"E5:E{last_row}",
             CellIsRule(operator="between", formula=["40", "69.9"],
                        fill=PatternFill("solid", fgColor="A9D18E")))
+        for col_letter in ("F", "G"):
+            ws.conditional_formatting.add(
+                f"{col_letter}5:{col_letter}{last_row}",
+                CellIsRule(operator="greaterThan", formula=["0"], fill=PatternFill("solid", fgColor="A9D18E")))
+            ws.conditional_formatting.add(
+                f"{col_letter}5:{col_letter}{last_row}",
+                CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FF7C80")))
         ws.conditional_formatting.add(
-            f"M5:M{last_row}",
+            f"Q5:Q{last_row}",
             CellIsRule(operator="notEqual", formula=['"GEÇTİ"'],
                        fill=PatternFill("solid", fgColor="FF7C80")))
 
     ws.freeze_panes = "A5"
 
     note_row = last_row + 3
-    ws.merge_cells(f"A{note_row}:M{note_row}")
+    ws.merge_cells(f"A{note_row}:Q{note_row}")
     ws[f"A{note_row}"] = (f"Not: Skorlar her fonu KENDİ TÜRÜNDEKİ emsalleriyle kıyaslar (yüzdelik dilim, "
-                           f"0-100). Toplam Skor = (Getiri + Akış percentile) / 2. ~{LOOKBACK_DAYS} günlük "
-                           "veri kullanılır. Net Akış, tedavüldeki pay sayısı değişiminden tahmin edilir "
-                           "(gerçek TEFAS raporlarıyla küçük farklar olabilir).")
+                           f"0-100, sadece ~1 Ay Getiri ve Akış/Büyüklük (1A) skora dahildir). Skor Değ. "
+                           "(1G/1H), bu skorun bir/yedi gün önceki değerine göre değişimidir — ilk birkaç "
+                           "çalıştırmada geçmiş veri yetersiz olduğu için boş gelir. Net Akış, tedavüldeki "
+                           "pay sayısı değişiminden tahmin edilir (gerçek TEFAS raporlarıyla küçük farklar "
+                           "olabilir).")
     ws[f"A{note_row}"].font = Font(name=FONT, size=9, italic=True, color="7F7F7F")
     ws[f"A{note_row}"].alignment = left
 
@@ -979,13 +1108,39 @@ def main():
         if not r["risk_passed"]:
             r["getiri_percentile"] = None
             r["akis_percentile"] = None
-            r["toplam_skor"] = None
+            r["toplam_skor_ham"] = None
             continue
         r["getiri_percentile"] = percentile_rank(r["getiri_pct"], getiri_by_tur.get(r["sfon_tur"], []))
         r["akis_percentile"] = (percentile_rank(r["akis_oran_pct"], akis_by_tur.get(r["sfon_tur"], []))
                                  if r["akis_oran_pct"] is not None else None)
         parcalar = [p for p in (r["getiri_percentile"], r["akis_percentile"]) if p is not None]
-        r["toplam_skor"] = sum(parcalar) / len(parcalar) if parcalar else None
+        r["toplam_skor_ham"] = sum(parcalar) / len(parcalar) if parcalar else None
+
+    # Iki bagimsiz yuzdelik dilimin ortalamasi istatistiksel olarak ortaya yigilir
+    # (iki zar atip toplaminin 7'ye yigilmasi gibi) - fonlarin cogu 40-60 bandinda
+    # kumelenir, secim zorlasir. Bunu duzeltmek icin ham toplam skoru KENDI TURU
+    # icinde TEKRAR yuzdelik dilime ceviriyoruz ("percentile of percentile") -
+    # goreceli siralama aynen korunur ama dagilim zorla duzgun 0-100'e yayilir.
+    ham_skor_by_tur = defaultdict(list)
+    for r in ham_sonuclar:
+        if r["risk_passed"] and r["toplam_skor_ham"] is not None:
+            ham_skor_by_tur[r["sfon_tur"]].append(r["toplam_skor_ham"])
+    for tur in ham_skor_by_tur:
+        ham_skor_by_tur[tur].sort()
+
+    for r in ham_sonuclar:
+        if not r["risk_passed"] or r["toplam_skor_ham"] is None:
+            r["toplam_skor"] = None
+            continue
+        r["toplam_skor"] = percentile_rank(r["toplam_skor_ham"], ham_skor_by_tur.get(r["sfon_tur"], []))
+
+    print("Skor değişimi (günlük/haftalık) hesaplanıyor...")
+    skor_gecmisi = load_fon_skor_gecmis()
+    for r in ham_sonuclar:
+        gecmis_for_fon = skor_gecmisi.get(r["fonKodu"], [])
+        r["skor_degisim_1g"] = compute_skor_degisim(gecmis_for_fon, r["toplam_skor"], run_date, 1)
+        r["skor_degisim_1h"] = compute_skor_degisim(gecmis_for_fon, r["toplam_skor"], run_date, 7)
+    append_fon_skor_gecmis(ham_sonuclar, run_date)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTPUT_DIR / f"TEFAS_Fon_Model_Portfoy_{run_date_str.replace('-', '')}.xlsx"
