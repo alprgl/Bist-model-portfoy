@@ -656,9 +656,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #0B1512;
-      --bg-elevated: #121D19;
-      --bg-sunken: #0A0F0D;
+      --bg: #000000;
+      --bg-elevated: #0A0A0A;
+      --bg-sunken: #000000;
       --ink: #E7EFEC;
       --ink-muted: #93A79E;
       --ink-faint: #607068;
@@ -685,9 +685,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   }
 
   :root[data-theme="dark"] {
-    --bg: #0B1512;
-    --bg-elevated: #121D19;
-    --bg-sunken: #0A0F0D;
+    --bg: #000000;
+    --bg-elevated: #0A0A0A;
+    --bg-sunken: #000000;
     --ink: #E7EFEC;
     --ink-muted: #93A79E;
     --ink-faint: #607068;
