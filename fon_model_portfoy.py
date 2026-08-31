@@ -7,14 +7,24 @@ Türkiye'de TEFAS'ta (Takasbank Fon Bilgilendirme Platformu) işlem gören tüm
 yatırım fonlarını tarar, her fonu KENDİ TÜRÜNDEKİ (şemsiye fon türü) emsalleriyle
 kıyaslayarak iki kriterde puanlar:
 
-  Katman A - Getiri: Fonun ~1 aylık getirisi, kendi türündeki fonlara göre
-             yüzdelik dilimi (percentile rank).
-  Katman B - Para Akışı: Fonun tedavüldeki pay sayısındaki günlük değişimi
+  Katman A - Getiri (%45): Günlük/haftalık/~1 aylık/3 aylık/6 aylık/1 yıllık
+             getiriler ile Sharpe-benzeri risk-ayarlı bir oranın (getiri/
+             volatilite), kendi türündeki fonlara göre ortalama yüzdelik dilimi.
+  Katman B - Para Akışı (%20): Fonun tedavüldeki pay sayısındaki günlük değişimi
              (× o günün fiyatı) toplanarak net nakit girişi/çıkışı tahmin
-             edilir, portföy büyüklüğüne oranlanır, yine kendi türü içinde
-             yüzdelik dilimi hesaplanır. "Paranın nereye aktığı" sinyalidir.
+             edilir, portföy büyüklüğüne oranlanır; ayrıca bu oranın fonun
+             KENDİ geçmiş ortalamasına göre z-skoru hesaplanır ("normalden
+             fazla/az para mı giriyor" sinyali). İkisinin ortalama percentile'ı.
+  Katman C - Risk (%35): Düşük volatilite + küçük maks. düşüş + düşük yatırımcı
+             yoğunlaşmasının (az sayıda büyük yatırımcıya bağımlılık) ortalama
+             yüzdelik dilimi.
 
-Toplam Skor = (Getiri Percentile + Para Akışı Percentile) / 2  (0-100 arası)
+Toplam Skor = ağırlıklı_ortalama(Katman A×0.45, Katman B×0.20, Katman C×0.35),
+sonra kendi türü içinde tekrar yüzdelik dilime çevrilir (dağılımı düz tutmak
+için). Ağırlıklar eşit değil: risk-ayarlı getirinin akış sinyalinden daha
+kalıcı/öngörülebilir olduğu literatür bulgusuna dayanır (Morningstar MRAR,
+Refinitiv Lipper Leaders metodolojileri ve fon performansı süreklilik
+literatürü).
 
 VERİ KAYNAĞI
 ------------
@@ -47,12 +57,29 @@ FON_TUR_URL = f"{API_BASE}/fonTurGetir"
 
 OUTPUT_DIR = Path("./ciktilar")
 FON_SKOR_GECMIS_FILE = Path("./fon_skor_gecmis.csv")  # skor degisimini takip etmek icin
+FON_AKIS_GECMIS_FILE = Path("./fon_akis_gecmis.csv")  # akis z-skoru icin fonun kendi gecmisini biriktirir
 DOCS_DIR = Path(__file__).resolve().parent / "docs"   # GitHub Pages buradan yayinlanir
 GIT_AUTO_PUBLISH = True    # True ise her calistirmada docs/fon.html otomatik commit+push edilir
 
 LOOKBACK_DAYS = 30          # getiri/akis hesabi icin kac takvim gunu geriye gidilecek
 RISK_MIN_PORTFOY_BUYUKLUK = 10_000_000.0   # TL - bunun altindaki fonlar ELENIR (kucuk/likit degil)
 RISK_MIN_KISI_SAYISI = 10                  # bunun altindaki fonlar ELENIR (halka acik degil / ozel fon)
+
+# Katman agirliklari: getiri kalicilik literaturunde risk-ayarli getirinin ham
+# getiriden daha tutarli oldugu, akis sinyalinin ise kisa vadede daha gurultulu
+# oldugu bulgularina dayanir (bkz. Morningstar MRAR, Lipper Leaders, "smart money"
+# literaturu). Toplami 1.0 olmasi sart degil - eksik katmanlarda otomatik
+# yeniden normalize edilir (bkz. main() icindeki agirlikli ortalama).
+KATMAN_AGIRLIKLARI = {"katman_a_getiri": 0.45, "katman_b_akis": 0.20, "katman_c_risk": 0.35}
+
+SHARPE_VOLATILITE_TABAN = 0.01   # sharpe-benzeri oranda sifira bolmeyi onlemek icin volatilite tabani (%)
+AKIS_Z_MIN_GOZLEM = 10            # akis z-skoru icin fonun kendi gecmisinde en az kac gun veri gerekli
+
+# TEFAS API tek istekte 1 aydan uzun tarih araligina izin vermiyor, bu yuzden uzun
+# vadeli getiriler icin (3/6/12 ay) o tarihlerin etrafinda DAR birer "referans fiyat"
+# penceresi ayrica cekilir (tum fonlar icin tek istek, hafif).
+UZUN_VADE_DONEMLERI = [("3a", 90), ("6a", 180), ("1y", 365)]
+REFERANS_PENCERE_GUN = 6   # hedef tarihin etrafinda kac gunluk pencereye bakilacak (tatil/haftasonu icin pay)
 
 REQUEST_TIMEOUT_SEC = 30
 REQUEST_HEADERS = {
@@ -152,6 +179,30 @@ def fetch_tum_fonlar_zaman_serisi(bas_tarih: date, bit_tarih: date):
     return by_fon, payload_json.get("toplamSayi")
 
 
+def fetch_referans_fiyatlar(hedef_tarih: date, pencere_gun: int = REFERANS_PENCERE_GUN):
+    """hedef_tarih etrafinda DAR bir pencerede (TEFAS 1 aydan uzun araligi reddettigi
+    icin) tum fonlarin en yakin fiyatini tek istekte ceker. Doner: {fonKodu: fiyat}."""
+    bas_tarih = hedef_tarih - timedelta(days=pencere_gun)
+    payload = {
+        "fonTipi": "YAT", "fonKodu": None, "aramaMetni": None, "fonTurKod": None,
+        "fonGrubu": None, "sfonTurKod": None,
+        "basTarih": bas_tarih.strftime("%Y%m%d"), "bitTarih": hedef_tarih.strftime("%Y%m%d"),
+        "basSira": 1, "bitSira": 60000, "fonTurAciklama": None, "dil": "TR", "kurucuKod": None,
+    }
+    payload_json = tefas_post(FON_GENEL_URL, payload)
+    rows = payload_json.get("resultList") or []
+
+    en_yakin = {}
+    for r in rows:
+        if r.get("fiyat") is None:
+            continue
+        t = datetime.strptime(r["tarih"], "%Y-%m-%d").date()
+        mevcut = en_yakin.get(r["fonKodu"])
+        if mevcut is None or t > mevcut[0]:
+            en_yakin[r["fonKodu"]] = (t, r["fiyat"])
+    return {kod: fiyat for kod, (_, fiyat) in en_yakin.items()}
+
+
 # =============================================================================
 # METRİK HESAPLAMA
 # =============================================================================
@@ -188,6 +239,38 @@ def _pencere_metrikleri(series, gun_sayisi):
     return getiri_pct, net_akis_tl, akis_oran_pct
 
 
+def _pencere_risk_metrikleri(series, gun_sayisi):
+    """series icinde son gun_sayisi takvim gunundeki GUNLUK fiyat degisimlerinden
+    volatilite (gunluk getirilerin std sapmasi, %) ve maksimum dusus (en yuksek
+    noktadan en buyuk % geri cekilme, negatif deger) hesaplar. Doner: (volatilite,
+    max_dusus) - yetersiz veri varsa (None, None)."""
+    son_tarih = series[-1]["tarih"]
+    hedef_tarih = son_tarih - timedelta(days=gun_sayisi)
+    pencere = [pt for pt in series if pt["tarih"] > hedef_tarih and pt.get("fiyat")]
+    if len(pencere) < 3:
+        return None, None
+
+    fiyatlar = [pt["fiyat"] for pt in pencere]
+    getiriler = [(fiyatlar[i] - fiyatlar[i - 1]) / fiyatlar[i - 1]
+                 for i in range(1, len(fiyatlar)) if fiyatlar[i - 1]]
+    volatilite = None
+    if len(getiriler) >= 2:
+        ort = sum(getiriler) / len(getiriler)
+        varyans = sum((g - ort) ** 2 for g in getiriler) / (len(getiriler) - 1)
+        volatilite = (varyans ** 0.5) * 100.0
+
+    tepe = fiyatlar[0]
+    max_dusus = 0.0
+    for f in fiyatlar:
+        if f > tepe:
+            tepe = f
+        dusus = (f - tepe) / tepe * 100.0
+        if dusus < max_dusus:
+            max_dusus = dusus
+
+    return volatilite, max_dusus
+
+
 def compute_fund_metrics(series):
     """series: tarihe gore artan sirali gunluk kayitlar (bkz. fetch_tum_fonlar_zaman_serisi).
     Gunluk (1g), haftalik (1h) ve ~LOOKBACK_DAYS gunluk (1a) pencereler icin ayri ayri
@@ -219,6 +302,21 @@ def compute_fund_metrics(series):
     if ilk.get("kisiSayisi") is not None and son.get("kisiSayisi") is not None:
         kisi_degisim = son["kisiSayisi"] - ilk["kisiSayisi"]
 
+    volatilite_1h, max_dusus_1h = _pencere_risk_metrikleri(series, 7)
+    volatilite_1a, max_dusus_1a = _pencere_risk_metrikleri(series, LOOKBACK_DAYS)
+
+    # Sharpe-benzeri risk-ayarli oran: ~1 aylik getiri / ~1 aylik volatilite. Risksiz
+    # faiz orani dusulmedigi ve gunluk getiri std'si yillandirilmadigi icin GERCEK bir
+    # Sharpe orani degildir - sadece AYNI TUR icindeki fonlari "getiri basina risk"
+    # acisindan siralamak icin kullanilir (mutlak degeri degil, goreceli sirasi onemli).
+    sharpe_1a = None
+    if volatilite_1a is not None:
+        sharpe_1a = getiri_1a / max(volatilite_1a, SHARPE_VOLATILITE_TABAN)
+
+    yogunlasma_tl = None  # ortalama yatirimci payi (TL) - yuksekse birkac buyuk yatirimciya bagimli
+    if son.get("kisiSayisi") and son["kisiSayisi"] > 0 and son.get("portfoyBuyukluk"):
+        yogunlasma_tl = son["portfoyBuyukluk"] / son["kisiSayisi"]
+
     return {
         "fonUnvan": son.get("fonUnvan"),
         "guncel_fiyat": son["fiyat"],
@@ -227,6 +325,10 @@ def compute_fund_metrics(series):
         "getiri_pct": getiri_1a, "net_akis_tl": net_akis_1a, "akis_oran_pct": akis_oran_1a,
         "getiri_1g": getiri_1g, "net_akis_1g": net_akis_1g, "akis_oran_1g": akis_oran_1g,
         "getiri_1h": getiri_1h, "net_akis_1h": net_akis_1h, "akis_oran_1h": akis_oran_1h,
+        "volatilite_1h": volatilite_1h, "max_dusus_1h": max_dusus_1h,
+        "volatilite_1a": volatilite_1a, "max_dusus_1a": max_dusus_1a,
+        "sharpe_1a": sharpe_1a,
+        "yogunlasma_tl": yogunlasma_tl,
         "kisi_degisim": kisi_degisim,
         "veri_gun_sayisi": len(series),
         "ilk_tarih": ilk["tarih"].isoformat(),
@@ -248,7 +350,7 @@ def apply_risk_filter(metrics):
 
 def percentile_rank(value, all_values_sorted):
     """value'nun all_values_sorted (artan sirali) icindeki yuzdelik dilimini (0-100) doner."""
-    if not all_values_sorted:
+    if value is None or not all_values_sorted:
         return None
     n = len(all_values_sorted)
     # kacinin value'dan kucuk oldugunu say (basit ama 2000 fon icin yeterince hizli)
@@ -316,6 +418,74 @@ def compute_skor_degisim(gecmis_for_fon, bugunku_skor, run_date: date, gun_sayis
     if nokta is None:
         return None
     return bugunku_skor - nokta["toplam_skor"]
+
+
+# =============================================================================
+# AKIŞ GEÇMİŞİ (fonun akışını KENDİ geçmişine göre z-skora çevirmek için)
+# =============================================================================
+#
+# Literatürdeki "smart money" bulgusu, ham para girişinden çok BEKLENENDEN
+# FAZLA/AZ girişin sinyal taşıdığını gösteriyor. Burada "beklenen akış", fonun
+# kendi geçmiş ~1 aylık akış/büyüklük oranlarının ortalaması olarak alınıyor;
+# bugünkü oran bu ortalamaya göre kaç standart sapma uzakta (z-skoru) hesaplanır.
+# Böylece yapısal olarak hep para toplayan/kaybeden bir fon değil, NORMALİNDEN
+# SAPAN fonlar öne çıkar.
+
+def load_fon_akis_gecmis():
+    """fon_akis_gecmis.csv'yi {fonKodu: [{'tarih': date, 'akis_oran_pct': float}, ...]}
+    seklinde okur (tarihe gore artan sirali). Dosya yoksa bos dict doner."""
+    if not FON_AKIS_GECMIS_FILE.exists():
+        return {}
+    gecmis = defaultdict(list)
+    with open(FON_AKIS_GECMIS_FILE, "r", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("akis_oran_pct") in (None, "", "None"):
+                continue
+            gecmis[row["fonKodu"]].append({
+                "tarih": datetime.strptime(row["tarih"], "%Y-%m-%d").date(),
+                "akis_oran_pct": float(row["akis_oran_pct"]),
+            })
+    for fon_kodu in gecmis:
+        gecmis[fon_kodu].sort(key=lambda x: x["tarih"])
+    return gecmis
+
+
+def append_fon_akis_gecmis(ham_sonuclar, run_date: date):
+    """Bu calistirmanin ~1 aylik akis/buyukluk oranlarini fon_akis_gecmis.csv'ye
+    ekler (akis z-skoru icin gerekli gecmis birikimi). Ayni gun icin zaten kayit
+    varsa tekrar eklemez."""
+    file_exists = FON_AKIS_GECMIS_FILE.exists()
+    if file_exists:
+        with open(FON_AKIS_GECMIS_FILE, "r", encoding="utf-8", newline="") as f:
+            mevcut_tarihler = {row["tarih"] for row in csv.DictReader(f)}
+        if run_date.isoformat() in mevcut_tarihler:
+            print(f"  fon_akis_gecmis.csv: {run_date} tarihli kayit zaten var, tekrar eklenmedi.")
+            return
+    with open(FON_AKIS_GECMIS_FILE, "a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["tarih", "fonKodu", "akis_oran_pct"])
+        for r in ham_sonuclar:
+            akis = r.get("akis_oran_pct")
+            writer.writerow([run_date.isoformat(), r["fonKodu"], akis if akis is not None else ""])
+    print(f"fon_akis_gecmis.csv guncellendi (+{len(ham_sonuclar)} satir, tarih={run_date}).")
+
+
+def compute_akis_z(gecmis_for_fon, bugunku_akis, min_gozlem: int = AKIS_Z_MIN_GOZLEM):
+    """Fonun BUGUNKU ~1 aylik akis/buyukluk oranini, KENDI GECMISINDEKI (bugun
+    haric) ayni oranin ortalama ve standart sapmasina gore z-skora cevirir: pozitif
+    z = fona normalden fazla, negatif z = normalden az para giriyor. Gecmis
+    min_gozlem'den az veya varyans sifirsa None doner (ilk ~min_gozlem calistirma
+    icin bos gelir - skor_degisim alanlariyla ayni birikim mantigi)."""
+    if bugunku_akis is None or len(gecmis_for_fon) < min_gozlem:
+        return None
+    degerler = [k["akis_oran_pct"] for k in gecmis_for_fon]
+    ort = sum(degerler) / len(degerler)
+    varyans = sum((d - ort) ** 2 for d in degerler) / (len(degerler) - 1)
+    std = varyans ** 0.5
+    if std <= 1e-9:
+        return None
+    return (bugunku_akis - ort) / std
 
 
 # =============================================================================
@@ -581,7 +751,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     background: var(--bg-elevated);
     box-shadow: var(--shadow);
   }
-  table { border-collapse: collapse; width: 100%; min-width: 1560px; }
+  table { border-collapse: collapse; width: 100%; min-width: 2400px; }
   thead th {
     position: sticky; top: 0; z-index: 2;
     background: var(--bg-sunken);
@@ -740,17 +910,28 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     { key: 'fonKodu', label: 'Kod', sort: (d) => d.fonKodu },
     { key: 'fonUnvan', label: 'Fon Unvanı', sort: (d) => d.fonUnvan },
     { key: 'toplam_skor', label: 'Skor', num: true, sort: (d) => d.toplam_skor ?? -1 },
+    { key: 'katman_a_getiri', label: 'Katman A (Getiri)', num: true, sort: (d) => d.katman_a_getiri ?? -1 },
+    { key: 'katman_b_akis', label: 'Katman B (Akış)', num: true, sort: (d) => d.katman_b_akis ?? -1 },
+    { key: 'katman_c_risk', label: 'Katman C (Risk)', num: true, sort: (d) => d.katman_c_risk ?? -1 },
     { key: 'skor_degisim_1g', label: 'Skor Değ. 1G', num: true, sort: (d) => d.skor_degisim_1g ?? -Infinity },
     { key: 'skor_degisim_1h', label: 'Skor Değ. 1H', num: true, sort: (d) => d.skor_degisim_1h ?? -Infinity },
     { key: 'getiri_1g', label: 'Günlük Getiri', num: true, sort: (d) => d.getiri_1g ?? -Infinity },
     { key: 'getiri_1h', label: 'Haftalık Getiri', num: true, sort: (d) => d.getiri_1h ?? -Infinity },
     { key: 'getiri_pct', label: '~1 Ay Getiri', num: true, sort: (d) => d.getiri_pct ?? -Infinity },
+    { key: 'getiri_3a', label: '3 Ay Getiri', num: true, sort: (d) => d.getiri_3a ?? -Infinity },
+    { key: 'getiri_6a', label: '6 Ay Getiri', num: true, sort: (d) => d.getiri_6a ?? -Infinity },
+    { key: 'getiri_1y', label: '1 Yıl Getiri', num: true, sort: (d) => d.getiri_1y ?? -Infinity },
     { key: 'akis_oran_1g', label: 'Günlük Akış', num: true, sort: (d) => d.akis_oran_1g ?? -Infinity },
     { key: 'akis_oran_1h', label: 'Haftalık Akış', num: true, sort: (d) => d.akis_oran_1h ?? -Infinity },
     { key: 'akis_oran_pct', label: 'Akış/Büyüklük', num: true, sort: (d) => d.akis_oran_pct ?? -Infinity },
+    { key: 'volatilite_1a', label: 'Volatilite (1A)', num: true, sort: (d) => d.volatilite_1a ?? -Infinity },
+    { key: 'max_dusus_1a', label: 'Maks. Düşüş (1A)', num: true, sort: (d) => d.max_dusus_1a ?? -Infinity },
+    { key: 'yogunlasma_bin_tl', label: 'Yoğunlaşma (Bin TL)', num: true, sort: (d) => d.yogunlasma_bin_tl ?? Infinity },
     { key: 'net_akis_mn', label: 'Net Akış (Mn TL)', num: true, sort: (d) => d.net_akis_mn ?? -Infinity },
     { key: 'portfoy_buyuklugu_mn', label: 'Büyüklük (Mn TL)', num: true, sort: (d) => d.portfoy_buyuklugu_mn ?? -Infinity },
     { key: 'kisi_sayisi', label: 'Yatırımcı', num: true, sort: (d) => d.kisi_sayisi ?? -Infinity },
+    { key: 'sharpe_1a', label: 'Sharpe-Benzeri (1A)', num: true, sort: (d) => d.sharpe_1a ?? -Infinity },
+    { key: 'akis_z', label: 'Akış Z-Skoru', num: true, sort: (d) => d.akis_z ?? -Infinity },
   ];
 
   let sortKey = 'toplam_skor';
@@ -835,17 +1016,28 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <td class="ticker">${d.fonKodu}</td>
         <td class="name">${d.fonUnvan || ''}<span class="sector">${d.tur || ''}</span></td>
         <td class="num"><div class="score-cell"><span class="score-num">${d.toplam_skor != null ? d.toplam_skor.toFixed(1) : '—'}</span><span class="score-track"><span class="score-fill" style="width:${Math.max(0, Math.min(100, d.toplam_skor ?? 0))}%"></span></span></div></td>
+        <td class="num">${d.katman_a_getiri != null ? d.katman_a_getiri.toFixed(1) : '—'}</td>
+        <td class="num">${d.katman_b_akis != null ? d.katman_b_akis.toFixed(1) : '—'}</td>
+        <td class="num">${d.katman_c_risk != null ? d.katman_c_risk.toFixed(1) : '—'}</td>
         <td class="num">${fmtPct(d.skor_degisim_1g)}</td>
         <td class="num">${fmtPct(d.skor_degisim_1h)}</td>
         <td class="num">${fmtPct(d.getiri_1g)}</td>
         <td class="num">${fmtPct(d.getiri_1h)}</td>
         <td class="num">${fmtPct(d.getiri_pct)}</td>
+        <td class="num">${fmtPct(d.getiri_3a)}</td>
+        <td class="num">${fmtPct(d.getiri_6a)}</td>
+        <td class="num">${fmtPct(d.getiri_1y)}</td>
         <td class="num">${fmtPct(d.akis_oran_1g)}</td>
         <td class="num">${fmtPct(d.akis_oran_1h)}</td>
         <td class="num">${fmtPct(d.akis_oran_pct)}</td>
+        <td class="num">${fmtNum(d.volatilite_1a, 2)}</td>
+        <td class="num">${fmtPct(d.max_dusus_1a)}</td>
+        <td class="num">${fmtNum(d.yogunlasma_bin_tl, 1)}</td>
         <td class="num">${fmtNum(d.net_akis_mn, 1)}</td>
         <td class="num">${fmtNum(d.portfoy_buyuklugu_mn, 0)}</td>
         <td class="num">${d.kisi_sayisi != null ? d.kisi_sayisi.toLocaleString('tr-TR') : '—'}</td>
+        <td class="num">${fmtNum(d.sharpe_1a, 2)}</td>
+        <td class="num">${fmtNum(d.akis_z, 2)}</td>
       </tr>`;
     }).join('');
   }
@@ -870,10 +1062,16 @@ def write_html_dashboard(rows, run_date_str, output_path: Path):
         dashboard_rows.append({
             "fonKodu": r["fonKodu"], "fonUnvan": r["fonUnvan"], "tur": r["tur_aciklama"],
             "toplam_skor": r["toplam_skor"],
+            "katman_a_getiri": r.get("katman_a_getiri"), "katman_b_akis": r.get("katman_b_akis"),
+            "katman_c_risk": r.get("katman_c_risk"),
             "skor_degisim_1g": r.get("skor_degisim_1g"), "skor_degisim_1h": r.get("skor_degisim_1h"),
             "getiri_1g": r.get("getiri_1g"), "getiri_1h": r.get("getiri_1h"), "getiri_pct": r["getiri_pct"],
+            "getiri_3a": r.get("getiri_3a"), "getiri_6a": r.get("getiri_6a"), "getiri_1y": r.get("getiri_1y"),
             "akis_oran_1g": r.get("akis_oran_1g"), "akis_oran_1h": r.get("akis_oran_1h"),
             "akis_oran_pct": r["akis_oran_pct"],
+            "volatilite_1a": r.get("volatilite_1a"), "max_dusus_1a": r.get("max_dusus_1a"),
+            "sharpe_1a": r.get("sharpe_1a"), "akis_z": r.get("akis_z"),
+            "yogunlasma_bin_tl": (r["yogunlasma_tl"] / 1_000) if r.get("yogunlasma_tl") is not None else None,
             "net_akis_mn": (r["net_akis_tl"] / 1_000_000) if r["net_akis_tl"] is not None else None,
             "portfoy_buyuklugu_mn": (r["guncel_portfoy_buyuklugu"] / 1_000_000) if r["guncel_portfoy_buyuklugu"] else None,
             "kisi_sayisi": r["guncel_kisi_sayisi"],
@@ -891,7 +1089,7 @@ def git_publish(run_date_str):
     basarisiz olursa scripti durdurmadan uyari basar."""
     import subprocess
     repo_dir = Path(__file__).resolve().parent
-    candidate_files = ["docs/fon.html", "fon_skor_gecmis.csv"]
+    candidate_files = ["docs/fon.html", "fon_skor_gecmis.csv", "fon_akis_gecmis.csv"]
     files_to_add = [f for f in candidate_files if (repo_dir / f).exists()]
     try:
         subprocess.run(
@@ -949,14 +1147,14 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    ws.merge_cells("A1:Q1")
+    ws.merge_cells("A1:Z1")
     ws["A1"] = f"TEFAS FON MODEL PORTFÖY — Tarama ({run_date_str})"
     ws["A1"].font = title_font
     ws["A1"].fill = fill_navy
     ws["A1"].alignment = center
     ws.row_dimensions[1].height = 26
 
-    ws.merge_cells("A2:Q2")
+    ws.merge_cells("A2:Z2")
     ws["A2"] = ("UYARI: Yatırım tavsiyesi değildir, sistematik bir tarama aracıdır. "
                 "Veri kaynağı: TEFAS (tefas.gov.tr). Karar sizindir.")
     ws["A2"].font = warn_font
@@ -964,11 +1162,17 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     ws["A2"].alignment = center
     ws.row_dimensions[2].height = 20
 
-    headers = ["Sıra", "Kod", "Fon Unvanı", "Tür", "Toplam Skor", "Skor Değ. (1G)", "Skor Değ. (1H)",
+    headers = ["Sıra", "Kod", "Fon Unvanı", "Tür", "Toplam Skor",
+               "Katman A (Getiri)", "Katman B (Akış)", "Katman C (Risk)",
+               "Skor Değ. (1G)", "Skor Değ. (1H)",
                "Günlük Getiri %", "Haftalık Getiri %", "~1 Ay Getiri %",
+               "3 Ay Getiri %", "6 Ay Getiri %", "1 Yıl Getiri %",
                "Günlük Akış %", "Haftalık Akış %", "Akış/Büyüklük % (1A)",
-               "Net Akış (Mn TL)", "Portföy Büyüklüğü (Mn TL)", "Yatırımcı Sayısı", "Risk Filtresi"]
-    widths = [6, 8, 38, 18, 11, 12, 12, 11, 12, 11, 11, 12, 15, 13, 16, 12, 22]
+               "Volatilite % (1A)", "Maks. Düşüş % (1A)", "Yoğunlaşma (Bin TL/Kişi)",
+               "Net Akış (Mn TL)", "Portföy Büyüklüğü (Mn TL)", "Yatırımcı Sayısı", "Risk Filtresi",
+               "Sharpe-Benzeri (1A)", "Akış Z-Skoru (Kendi Geçmişi)"]
+    widths = [6, 8, 36, 17, 11, 13, 12, 12, 11, 11, 10, 11, 11, 10, 10, 10, 11, 11, 13, 12, 13, 15, 13, 16, 12, 20,
+              14, 16]
     for i, (h, w) in enumerate(zip(headers, widths)):
         col = chr(ord("A") + i) if i < 26 else "A" + chr(ord("A") + i - 26)
         ws.column_dimensions[col].width = w
@@ -977,7 +1181,7 @@ def write_excel_report(rows, run_date_str, output_path: Path):
         c.fill = fill_header
         c.alignment = center
         c.border = border_all
-    ws.row_dimensions[4].height = 30
+    ws.row_dimensions[4].height = 32
 
     def sort_key(r):
         if not r["risk_passed"]:
@@ -993,24 +1197,35 @@ def write_excel_report(rows, run_date_str, output_path: Path):
         vals = [
             i + 1, r["fonKodu"], r["fonUnvan"], r["tur_aciklama"],
             round(r["toplam_skor"], 1) if r["toplam_skor"] is not None else None,
+            round(r["katman_a_getiri"], 1) if r.get("katman_a_getiri") is not None else None,
+            round(r["katman_b_akis"], 1) if r.get("katman_b_akis") is not None else None,
+            round(r["katman_c_risk"], 1) if r.get("katman_c_risk") is not None else None,
             round(r["skor_degisim_1g"], 1) if r.get("skor_degisim_1g") is not None else None,
             round(r["skor_degisim_1h"], 1) if r.get("skor_degisim_1h") is not None else None,
             round(r["getiri_1g"], 2) if r.get("getiri_1g") is not None else None,
             round(r["getiri_1h"], 2) if r.get("getiri_1h") is not None else None,
             round(r["getiri_pct"], 2) if r["getiri_pct"] is not None else None,
+            round(r["getiri_3a"], 2) if r.get("getiri_3a") is not None else None,
+            round(r["getiri_6a"], 2) if r.get("getiri_6a") is not None else None,
+            round(r["getiri_1y"], 2) if r.get("getiri_1y") is not None else None,
             round(r["akis_oran_1g"], 2) if r.get("akis_oran_1g") is not None else None,
             round(r["akis_oran_1h"], 2) if r.get("akis_oran_1h") is not None else None,
             round(r["akis_oran_pct"], 2) if r["akis_oran_pct"] is not None else None,
+            round(r["volatilite_1a"], 2) if r.get("volatilite_1a") is not None else None,
+            round(r["max_dusus_1a"], 2) if r.get("max_dusus_1a") is not None else None,
+            round(r["yogunlasma_tl"] / 1_000, 1) if r.get("yogunlasma_tl") is not None else None,
             round(r["net_akis_tl"] / 1_000_000, 2) if r["net_akis_tl"] is not None else None,
             round(r["guncel_portfoy_buyuklugu"] / 1_000_000, 1) if r["guncel_portfoy_buyuklugu"] else None,
             r["guncel_kisi_sayisi"],
             r["risk_status"],
+            round(r["sharpe_1a"], 2) if r.get("sharpe_1a") is not None else None,
+            round(r["akis_z"], 2) if r.get("akis_z") is not None else None,
         ]
         for col, v in enumerate(vals, 1):
             cell = ws.cell(row=r_idx, column=col, value=v)
             cell.font = normal_font
             cell.border = border_all
-            cell.alignment = left if col in (3, 17) else center
+            cell.alignment = left if col in (3, 26) else center
         r_idx += 1
 
     last_row = r_idx - 1
@@ -1023,7 +1238,7 @@ def write_excel_report(rows, run_date_str, output_path: Path):
             f"E5:E{last_row}",
             CellIsRule(operator="between", formula=["40", "69.9"],
                        fill=PatternFill("solid", fgColor="A9D18E")))
-        for col_letter in ("F", "G"):
+        for col_letter in ("I", "J"):
             ws.conditional_formatting.add(
                 f"{col_letter}5:{col_letter}{last_row}",
                 CellIsRule(operator="greaterThan", formula=["0"], fill=PatternFill("solid", fgColor="A9D18E")))
@@ -1031,20 +1246,31 @@ def write_excel_report(rows, run_date_str, output_path: Path):
                 f"{col_letter}5:{col_letter}{last_row}",
                 CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FF7C80")))
         ws.conditional_formatting.add(
-            f"Q5:Q{last_row}",
+            f"Z5:Z{last_row}",
             CellIsRule(operator="notEqual", formula=['"GEÇTİ"'],
                        fill=PatternFill("solid", fgColor="FF7C80")))
 
     ws.freeze_panes = "A5"
 
     note_row = last_row + 3
-    ws.merge_cells(f"A{note_row}:Q{note_row}")
-    ws[f"A{note_row}"] = (f"Not: Skorlar her fonu KENDİ TÜRÜNDEKİ emsalleriyle kıyaslar (yüzdelik dilim, "
-                           f"0-100, sadece ~1 Ay Getiri ve Akış/Büyüklük (1A) skora dahildir). Skor Değ. "
-                           "(1G/1H), bu skorun bir/yedi gün önceki değerine göre değişimidir — ilk birkaç "
-                           "çalıştırmada geçmiş veri yetersiz olduğu için boş gelir. Net Akış, tedavüldeki "
-                           "pay sayısı değişiminden tahmin edilir (gerçek TEFAS raporlarıyla küçük farklar "
-                           "olabilir).")
+    ws.merge_cells(f"A{note_row}:Z{note_row}")
+    ws[f"A{note_row}"] = (
+        "Not: Toplam Skor = ağırlıklı ortalama(Katman A %45, Katman B %20, Katman C %35), sonra kendi "
+        "türü içinde tekrar yüzdelik dilime çevrilir (dağılımı düz tutmak için). Ağırlıklar, risk-ayarlı "
+        "getirinin akış sinyalinden daha kalıcı olduğu bulgusuna dayanır (Morningstar/Lipper metodolojileri "
+        "ve akademik literatür). Katman A = 1 Hafta/1 Ay/3 Ay/6 Ay/1 Yıl getirileri + Sharpe-benzeri oranın "
+        "(1 Ay getiri / 1 Ay volatilite) ortalama percentile'ı. Katman B = 1 Hafta/1 Ay akış oranı + Akış "
+        "Z-Skoru'nun ortalama percentile'ı. Katman C = düşük volatilite + küçük maks. düşüş + düşük "
+        "yatırımcı yoğunlaşmasının ortalama percentile'ı (üçü de \"düşük risk\" yönünde normalize "
+        "edilmiştir). Sharpe-Benzeri (1A), risksiz faiz oranı düşülmemiş/yıllandırılmamış basit bir "
+        "getiri/risk oranıdır — sadece AYNI TÜR içindeki fonları sıralamak için kullanılır, mutlak değeri "
+        "yorumlanmamalıdır. Akış Z-Skoru, fonun bugünkü akış/büyüklük oranının KENDİ geçmiş ortalamasına "
+        "göre kaç standart sapma uzakta olduğunu gösterir (pozitif = normalden fazla para giriyor); en az "
+        f"{AKIS_Z_MIN_GOZLEM} günlük geçmiş birikene kadar boş gelir. Skor Değ. (1G/1H), Toplam Skor'un "
+        "bir/yedi gün önceki değerine göre değişimidir — ilk birkaç çalıştırmada boş gelir. Net Akış, "
+        "tedavüldeki pay sayısı değişiminden tahmin edilir. 3/6/12 aylık getiriler, o tarihlerin "
+        "etrafındaki en yakın işlem gününün fiyatına dayanır."
+    )
     ws[f"A{note_row}"].font = Font(name=FONT, size=9, italic=True, color="7F7F7F")
     ws[f"A{note_row}"].alignment = left
 
@@ -1090,31 +1316,95 @@ def main():
 
     print(f"  -> {len(ham_sonuclar)} fon için metrik hesaplandı.\n")
 
+    print("Uzun vadeli getiri için referans fiyatlar çekiliyor (3 ay, 6 ay, 1 yıl)...")
+    referans_fiyatlar = {}
+    for etiket, gun_sayisi in UZUN_VADE_DONEMLERI:
+        hedef = run_date - timedelta(days=gun_sayisi)
+        referans_fiyatlar[etiket] = fetch_referans_fiyatlar(hedef)
+        print(f"  {etiket} ({hedef}): {len(referans_fiyatlar[etiket])} fon için referans fiyat bulundu.")
+        time.sleep(1.0)
+
+    for r in ham_sonuclar:
+        for etiket, _ in UZUN_VADE_DONEMLERI:
+            ref_fiyat = referans_fiyatlar[etiket].get(r["fonKodu"])
+            r[f"getiri_{etiket}"] = (
+                (r["guncel_fiyat"] - ref_fiyat) / ref_fiyat * 100.0
+                if ref_fiyat else None
+            )
+    print()
+
+    print("Akış z-skoru (fonun kendi geçmişine göre) hesaplanıyor...")
+    akis_gecmisi = load_fon_akis_gecmis()
+    for r in ham_sonuclar:
+        gecmis_for_fon = akis_gecmisi.get(r["fonKodu"], [])
+        r["akis_z"] = compute_akis_z(gecmis_for_fon, r.get("akis_oran_pct"))
+    append_fon_akis_gecmis(ham_sonuclar, run_date)
+    print()
+
     print("Tür-bazlı yüzdelik dilim (percentile) skorları hesaplanıyor...")
-    getiri_by_tur = defaultdict(list)
-    akis_by_tur = defaultdict(list)
+
+    # Katman A (Getiri, coklu donem + sharpe-benzeri risk-ayarli oran), Katman B
+    # (Akis, coklu donem + kendi gecmisine gore z-skor) ve Katman C (Risk: dusuk
+    # volatilite + kucuk maks. dusus + dusuk yogunlasma = iyi) icin her metrigin
+    # kendi turu icindeki dagilimini kuruyoruz.
+    GETIRI_ALANLARI = ["getiri_1h", "getiri_pct", "getiri_3a", "getiri_6a", "getiri_1y", "sharpe_1a"]  # getiri_pct = ~1a
+    AKIS_ALANLARI = ["akis_oran_1h", "akis_oran_pct", "akis_z"]  # akis_oran_pct = ~1a
+    # Risk alanlarinda "iyi" yon farkli: volatilite/yogunlasma dusuk=iyi (ters cevrilecek),
+    # max_dusus zaten buyuk (0'a yakin, daha az negatif) = iyi (dogrudan kullanilabilir).
+    RISK_TERS_ALANLARI = ["volatilite_1a", "yogunlasma_tl"]      # dusuk deger iyi -> percentile ters cevrilir
+    RISK_DUZ_ALANLARI = ["max_dusus_1a"]                          # buyuk (az negatif) deger iyi -> dogrudan
+
+    dagilim_by_tur = defaultdict(lambda: defaultdict(list))
     for r in ham_sonuclar:
         if not r["risk_passed"]:
             continue
-        getiri_by_tur[r["sfon_tur"]].append(r["getiri_pct"])
-        if r["akis_oran_pct"] is not None:
-            akis_by_tur[r["sfon_tur"]].append(r["akis_oran_pct"])
-    for tur in getiri_by_tur:
-        getiri_by_tur[tur].sort()
-    for tur in akis_by_tur:
-        akis_by_tur[tur].sort()
+        for alan in GETIRI_ALANLARI + AKIS_ALANLARI + RISK_TERS_ALANLARI + RISK_DUZ_ALANLARI:
+            if r.get(alan) is not None:
+                dagilim_by_tur[r["sfon_tur"]][alan].append(r[alan])
+    for tur in dagilim_by_tur:
+        for alan in dagilim_by_tur[tur]:
+            dagilim_by_tur[tur][alan].sort()
+
+    def perc(r, alan):
+        return percentile_rank(r.get(alan), dagilim_by_tur.get(r["sfon_tur"], {}).get(alan, []))
 
     for r in ham_sonuclar:
         if not r["risk_passed"]:
-            r["getiri_percentile"] = None
-            r["akis_percentile"] = None
+            r["katman_a_getiri"] = None
+            r["katman_b_akis"] = None
+            r["katman_c_risk"] = None
             r["toplam_skor_ham"] = None
             continue
-        r["getiri_percentile"] = percentile_rank(r["getiri_pct"], getiri_by_tur.get(r["sfon_tur"], []))
-        r["akis_percentile"] = (percentile_rank(r["akis_oran_pct"], akis_by_tur.get(r["sfon_tur"], []))
-                                 if r["akis_oran_pct"] is not None else None)
-        parcalar = [p for p in (r["getiri_percentile"], r["akis_percentile"]) if p is not None]
-        r["toplam_skor_ham"] = sum(parcalar) / len(parcalar) if parcalar else None
+
+        getiri_pcts = [p for p in (perc(r, a) for a in GETIRI_ALANLARI) if p is not None]
+        r["katman_a_getiri"] = sum(getiri_pcts) / len(getiri_pcts) if getiri_pcts else None
+
+        akis_pcts = [p for p in (perc(r, a) for a in AKIS_ALANLARI) if p is not None]
+        r["katman_b_akis"] = sum(akis_pcts) / len(akis_pcts) if akis_pcts else None
+
+        risk_pcts = []
+        for a in RISK_TERS_ALANLARI:
+            p = perc(r, a)
+            if p is not None:
+                risk_pcts.append(100.0 - p)   # dusuk deger iyiydi -> ters cevir
+        for a in RISK_DUZ_ALANLARI:
+            p = perc(r, a)
+            if p is not None:
+                risk_pcts.append(p)
+        r["katman_c_risk"] = sum(risk_pcts) / len(risk_pcts) if risk_pcts else None
+
+        # Esit agirlik yerine KATMAN_AGIRLIKLARI kullanilir (bkz. ayarlar bolumu).
+        # Eksik katman varsa (orn. yeni fonda akis gecmisi yok), kalan katmanlarin
+        # agirliklari kendi aralarinda yeniden normalize edilir.
+        katman_degerleri = {"katman_a_getiri": r["katman_a_getiri"],
+                             "katman_b_akis": r["katman_b_akis"],
+                             "katman_c_risk": r["katman_c_risk"]}
+        toplam_agirlik = sum(KATMAN_AGIRLIKLARI[k] for k, v in katman_degerleri.items() if v is not None)
+        if toplam_agirlik > 0:
+            r["toplam_skor_ham"] = sum(KATMAN_AGIRLIKLARI[k] * v for k, v in katman_degerleri.items()
+                                        if v is not None) / toplam_agirlik
+        else:
+            r["toplam_skor_ham"] = None
 
     # Iki bagimsiz yuzdelik dilimin ortalamasi istatistiksel olarak ortaya yigilir
     # (iki zar atip toplaminin 7'ye yigilmasi gibi) - fonlarin cogu 40-60 bandinda
