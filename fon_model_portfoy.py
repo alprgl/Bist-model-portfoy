@@ -1320,7 +1320,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   const rangeAddBtn = document.getElementById('range-add');
   const filterChipsEl = document.getElementById('filter-chips');
   const numericCols = COLUMNS.filter(c => c.num);
-  rangeKeySel.innerHTML = '<option value="">Aralık filtresi…</option>' +
+  rangeKeySel.innerHTML = '<option value="">Filtre tipi…</option>' +
     numericCols.map(c => `<option value="${c.key}">${c.label}</option>`).join('');
 
   // Birden fazla kosulu AYNI ANDA uygulayabilmek icin: "+ Filtre ekle" tiklandiginda
