@@ -419,6 +419,7 @@
   thead th .arrow { font-size: 9px; margin-left: 3px; opacity: 0.8; }
   thead th.num, td.num { text-align: right; }
   tbody tr.row { border-bottom: 1px solid var(--border); }
+  tr.v-spacer, tr.v-spacer td { padding: 0; border: none; }
   tbody tr.row:hover { background: var(--accent-soft); }
   tbody tr.row.out { opacity: 0.55; }
   td { padding: 8px 12px; font-size: 13px; white-space: nowrap; }
@@ -558,7 +559,7 @@
 
   <div class="filter-chips" id="filter-chips"></div>
 
-  <div class="table-wrap">
+  <div class="table-wrap" id="table-wrap">
     <table>
       <thead>
         <tr id="head-row"></tr>
@@ -790,8 +791,18 @@
   const veriUyariToggle = document.getElementById('veri-uyari-toggle');
   const favoriToggle = document.getElementById('favori-toggle');
   const tbody = document.getElementById('tbody');
+  const tableWrap = document.getElementById('table-wrap');
   const emptyState = document.getElementById('empty-state');
   const resultCount = document.getElementById('result-count');
+
+  // SANAL KAYDIRMA (virtualization): 2000+ satirin TAMAMINI her arama/filtre/siralama
+  // degisikliginde yeniden DOM'a basmak (~2,6 MB HTML, ~250-300ms) belirgin bir
+  // takilma hissi yaratiyordu. Bunun yerine sadece GORUNUR pencere (+ tampon) kadar
+  // satir render edilir; kaydirdikca renderVisibleRows() o an gereken dilimi basar.
+  let currentRows = [];               // en son filtrelenmis+siralanmis TUM satirlar
+  let rowHeightEstimate = 58;         // ortalama satir yuksekligi (px) - ilk gercek olcumle kalibre edilir
+  let rowHeightCalibrated = false;
+  const VIRTUAL_TAMPON_SATIR = 12;    // gorunur alanin ustune/altina eklenen ekstra satir sayisi
 
   function renderStats() {
     const passed = DATA.filter(d => d.risk_passed);
@@ -855,28 +866,12 @@
     });
   }
 
-  function render() {
-    headRow.querySelectorAll('th[data-key]').forEach(th => {
-      th.classList.toggle('active', th.dataset.key === sortKey);
-      th.querySelector('.arrow').textContent = th.dataset.key === sortKey ? (sortDir === 1 ? '▲' : '▼') : '';
-    });
-
-    const col = COLUMNS.find(c => c.key === sortKey);
-    const rows = currentFilter().sort((a, b) => {
-      const av = col.sort(a), bv = col.sort(b);
-      if (typeof av === 'string') return av.localeCompare(bv, 'tr') * sortDir;
-      return (av - bv) * sortDir;
-    });
-
-    resultCount.textContent = rows.length + ' / ' + DATA.length + ' fon';
-    emptyState.style.display = rows.length ? 'none' : 'block';
-
-    tbody.innerHTML = rows.map(d => {
-      const tier = tierOf(d);
-      const uyariAlan = uyariAlanlari(d);
-      const wc = (key) => uyariAlan.has(key) ? ' cell-warn' : '';
-      const favoriDurum = favoriler.has(d.fonKodu);
-      return `
+  function satirHtml(d) {
+    const tier = tierOf(d);
+    const uyariAlan = uyariAlanlari(d);
+    const wc = (key) => uyariAlan.has(key) ? ' cell-warn' : '';
+    const favoriDurum = favoriler.has(d.fonKodu);
+    return `
       <tr class="row ${tier}">
         <td class="fav-cell"><button class="fav-star ${favoriDurum ? 'active' : ''}" data-kod="${d.fonKodu}" title="${favoriDurum ? 'Favorilerden çıkar' : 'Favorilere ekle'}" aria-label="${favoriDurum ? 'Favorilerden çıkar' : 'Favorilere ekle'}">${favoriDurum ? '★' : '☆'}</button></td>
         <td class="ticker${wc('fonKodu')}">${d.fonKodu}</td>
@@ -908,8 +903,63 @@
         <td class="num${wc('son_tarih')}">${d.son_tarih || '—'}</td>
         <td class="warn-cell">${d.veri_uyari_var ? `<span class="chip out" title="${(d.veri_uyarilari || []).join('; ').replace(/"/g, '&quot;')}">⚠ ${d.veri_uyarilari.length}</span>` : '—'}</td>
       </tr>`;
-    }).join('');
   }
+
+  function renderVisibleRows() {
+    const toplam = currentRows.length;
+    if (toplam === 0) { tbody.innerHTML = ''; return; }
+
+    const scrollTop = tableWrap.scrollTop;
+    const viewportH = tableWrap.clientHeight;
+    const startIdx = Math.max(0, Math.floor(scrollTop / rowHeightEstimate) - VIRTUAL_TAMPON_SATIR);
+    const endIdx = Math.min(toplam, Math.ceil((scrollTop + viewportH) / rowHeightEstimate) + VIRTUAL_TAMPON_SATIR);
+
+    const ustPx = startIdx * rowHeightEstimate;
+    const altPx = (toplam - endIdx) * rowHeightEstimate;
+    const ustSpacer = ustPx > 0 ? `<tr class="v-spacer" style="height:${ustPx}px"><td colspan="${COLUMNS.length}"></td></tr>` : '';
+    const altSpacer = altPx > 0 ? `<tr class="v-spacer" style="height:${altPx}px"><td colspan="${COLUMNS.length}"></td></tr>` : '';
+
+    tbody.innerHTML = ustSpacer + currentRows.slice(startIdx, endIdx).map(satirHtml).join('') + altSpacer;
+
+    // Ilk gercek olcumle tahmini satir yuksekligini KALIBRE ET (fon adi bazen 2 satira
+    // sarindigi icin sabit bir tahmin yerine gercek deger daha dogru pencere verir).
+    if (!rowHeightCalibrated) {
+      const ornekler = tbody.querySelectorAll('tr.row');
+      if (ornekler.length > 3) {
+        let toplamYukseklik = 0;
+        ornekler.forEach(tr => { toplamYukseklik += tr.getBoundingClientRect().height; });
+        const yeniTahmin = toplamYukseklik / ornekler.length;
+        if (yeniTahmin > 10) { rowHeightEstimate = yeniTahmin; rowHeightCalibrated = true; }
+      }
+    }
+  }
+
+  function render() {
+    headRow.querySelectorAll('th[data-key]').forEach(th => {
+      th.classList.toggle('active', th.dataset.key === sortKey);
+      th.querySelector('.arrow').textContent = th.dataset.key === sortKey ? (sortDir === 1 ? '▲' : '▼') : '';
+    });
+
+    const col = COLUMNS.find(c => c.key === sortKey);
+    currentRows = currentFilter().sort((a, b) => {
+      const av = col.sort(a), bv = col.sort(b);
+      if (typeof av === 'string') return av.localeCompare(bv, 'tr') * sortDir;
+      return (av - bv) * sortDir;
+    });
+
+    resultCount.textContent = currentRows.length + ' / ' + DATA.length + ' fon';
+    emptyState.style.display = currentRows.length ? 'none' : 'block';
+
+    tableWrap.scrollTop = 0;
+    renderVisibleRows();
+  }
+
+  let scrollRafBekliyor = false;
+  tableWrap.addEventListener('scroll', () => {
+    if (scrollRafBekliyor) return;
+    scrollRafBekliyor = true;
+    requestAnimationFrame(() => { renderVisibleRows(); scrollRafBekliyor = false; });
+  });
 
   searchInput.addEventListener('input', debouncedRender);
   turSel.addEventListener('change', render);
@@ -923,8 +973,20 @@
     const kod = btn.dataset.kod;
     if (favoriler.has(kod)) favoriler.delete(kod); else favoriler.add(kod);
     favorileriKaydet();
-    render();
     renderStats();
+    if (favoriToggle.checked) {
+      // "Sadece favorilerim" acikken favoriden cikan satir listeden kaybolmali - tam
+      // render() gerekir. Aksi halde sadece bu butonu guncelleyip scroll'u KORUYORUZ
+      // (render() filtre/arama degisince kasitli olarak basa donuyor, burada istemeyiz).
+      render();
+    } else {
+      const aktif = favoriler.has(kod);
+      btn.classList.toggle('active', aktif);
+      btn.textContent = aktif ? '★' : '☆';
+      const etiket = aktif ? 'Favorilerden çıkar' : 'Favorilere ekle';
+      btn.title = etiket;
+      btn.setAttribute('aria-label', etiket);
+    }
   });
 
   renderStats();
