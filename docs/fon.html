@@ -296,6 +296,71 @@
   }
   .range-clear:hover { background: var(--bg-sunken); color: var(--ink); }
 
+  .range-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .range-add:hover { filter: brightness(1.08); }
+  .range-add:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+
+  .filter-chips {
+    display: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 0 0 12px;
+  }
+  .filter-chips.visible { display: flex; }
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px 5px 12px;
+    border-radius: 20px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+  .filter-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.75;
+  }
+  .filter-chip-remove:hover { opacity: 1; background: rgba(0,0,0,0.08); }
+  .filter-chips-clear {
+    background: none;
+    border: none;
+    color: var(--ink-faint);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px;
+  }
+  .filter-chips-clear:hover { color: var(--ink); }
+
   .table-wrap {
     flex: 1;
     min-height: 0;
@@ -435,8 +500,9 @@
       <input id="range-min" type="number" step="any" placeholder="Min" inputmode="decimal">
       <span class="range-sep">–</span>
       <input id="range-max" type="number" step="any" placeholder="Maks" inputmode="decimal">
-      <button id="range-clear" class="range-clear" type="button" title="Aralık filtresini temizle" aria-label="Aralık filtresini temizle">×</button>
+      <button id="range-clear" class="range-clear" type="button" title="Bu satırı temizle" aria-label="Bu satırı temizle">×</button>
     </div>
+    <button id="range-add" class="range-add" type="button" title="Bu koşulu ekle (birden fazla koşul aynı anda uygulanır)">+ Filtre ekle</button>
     <label class="toggle-chip">
       <input type="checkbox" id="risk-toggle" checked>
       Sadece riski geçenler
@@ -451,6 +517,8 @@
     </label>
     <span class="result-count" id="result-count"></span>
   </section>
+
+  <div class="filter-chips" id="filter-chips"></div>
 
   <div class="table-wrap">
     <table>
@@ -592,18 +660,61 @@
   const rangeMinInput = document.getElementById('range-min');
   const rangeMaxInput = document.getElementById('range-max');
   const rangeClearBtn = document.getElementById('range-clear');
+  const rangeAddBtn = document.getElementById('range-add');
+  const filterChipsEl = document.getElementById('filter-chips');
   const numericCols = COLUMNS.filter(c => c.num);
   rangeKeySel.innerHTML = '<option value="">Aralık filtresi…</option>' +
     numericCols.map(c => `<option value="${c.key}">${c.label}</option>`).join('');
 
+  // Birden fazla kosulu AYNI ANDA uygulayabilmek icin: "+ Filtre ekle" tiklandiginda
+  // o an secili sutun/min/maks KALICI bir filtreye (aktifFiltreler) donusur ve satir
+  // sifirlanir, boylece ikinci/ucuncu bir kosul daha girilebilir. Hepsi VE (AND) ile
+  // birlesir. Satirdaki (henuz eklenmemis) deger de ayrica canli filtre olarak calisir.
+  let aktifFiltreler = [];
+
   function updateRangeState() {
     const active = !!rangeKeySel.value && (rangeMinInput.value !== '' || rangeMaxInput.value !== '');
     rangeField.classList.toggle('active', active);
+    rangeAddBtn.disabled = !active;
   }
+
+  function aralikMetni(f) {
+    if (f.min != null && f.max != null) return `${f.min}–${f.max}`;
+    if (f.min != null) return `≥ ${f.min}`;
+    return `≤ ${f.max}`;
+  }
+
+  function renderFiltreChipleri() {
+    filterChipsEl.classList.toggle('visible', aktifFiltreler.length > 0);
+    if (aktifFiltreler.length === 0) { filterChipsEl.innerHTML = ''; return; }
+    filterChipsEl.innerHTML = aktifFiltreler.map((f, i) =>
+      `<span class="filter-chip">${f.label} ${aralikMetni(f)}<button class="filter-chip-remove" data-idx="${i}" type="button" aria-label="${f.label} filtresini kaldır">×</button></span>`
+    ).join('') + (aktifFiltreler.length > 1
+      ? '<button class="filter-chips-clear" id="filter-chips-clear" type="button">Tümünü temizle</button>' : '');
+  }
+
+  function filtreEkle() {
+    const key = rangeKeySel.value;
+    const min = rangeMinInput.value === '' ? null : parseFloat(rangeMinInput.value);
+    const max = rangeMaxInput.value === '' ? null : parseFloat(rangeMaxInput.value);
+    if (!key || (min == null && max == null)) return;
+    const col = COLUMNS.find(c => c.key === key);
+    aktifFiltreler.push({ key, min, max, label: col ? col.label : key });
+    rangeKeySel.value = '';
+    rangeMinInput.value = '';
+    rangeMaxInput.value = '';
+    updateRangeState();
+    renderFiltreChipleri();
+    render();
+  }
+
   [rangeKeySel, rangeMinInput, rangeMaxInput].forEach(el => {
     el.addEventListener('input', () => { updateRangeState(); render(); });
     el.addEventListener('change', () => { updateRangeState(); render(); });
   });
+  rangeMinInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') filtreEkle(); });
+  rangeMaxInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') filtreEkle(); });
+  rangeAddBtn.addEventListener('click', filtreEkle);
   rangeClearBtn.addEventListener('click', () => {
     rangeKeySel.value = '';
     rangeMinInput.value = '';
@@ -611,6 +722,18 @@
     updateRangeState();
     render();
   });
+  filterChipsEl.addEventListener('click', (e) => {
+    if (e.target.id === 'filter-chips-clear') {
+      aktifFiltreler = [];
+    } else {
+      const btn = e.target.closest('.filter-chip-remove');
+      if (!btn) return;
+      aktifFiltreler.splice(parseInt(btn.dataset.idx, 10), 1);
+    }
+    renderFiltreChipleri();
+    render();
+  });
+  updateRangeState();
 
   const searchInput = document.getElementById('search');
   const riskToggle = document.getElementById('risk-toggle');
@@ -671,6 +794,12 @@
         if (val == null) return false;
         if (rangeMin != null && val < rangeMin) return false;
         if (rangeMax != null && val > rangeMax) return false;
+      }
+      for (const f of aktifFiltreler) {
+        const val = d[f.key];
+        if (val == null) return false;
+        if (f.min != null && val < f.min) return false;
+        if (f.max != null && val > f.max) return false;
       }
       return true;
     });
