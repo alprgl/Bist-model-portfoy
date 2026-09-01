@@ -1128,7 +1128,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   <header class="masthead">
     <div class="masthead-id">
       <span class="eyebrow">TEFAS · Fon Taraması</span>
-      <h1>TEFAS</h1>
+      <h1>TEFAS by alprgl</h1>
     </div>
     <div class="masthead-meta">
       Tarama tarihi: <strong id="run-date">—</strong><br>
