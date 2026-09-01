@@ -1110,8 +1110,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   function tierOf(d) {
     if (!d.risk_passed) return 'out';
     if (d.toplam_skor == null) return 'weak';
-    if (d.toplam_skor >= 70) return 'strong';
-    if (d.toplam_skor >= 40) return 'watch';
+    if (d.toplam_skor >= 90) return 'strong';
+    if (d.toplam_skor >= 70) return 'watch';
     return 'weak';
   }
 
@@ -1236,8 +1236,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
   function renderStats() {
     const passed = DATA.filter(d => d.risk_passed);
-    const strong = passed.filter(d => d.toplam_skor >= 70);
-    const watch = passed.filter(d => d.toplam_skor >= 40 && d.toplam_skor < 70);
+    const strong = passed.filter(d => d.toplam_skor >= 90);
+    const watch = passed.filter(d => d.toplam_skor >= 70 && d.toplam_skor < 90);
     const withFlow = passed.filter(d => d.akis_oran_pct != null);
     // Aritmetik ortalama, birkac asiri uc deger (orn. pay bolunmesi kaynakli %5000+ akis)
     // tarafindan komple domine edilip anlamsizlasabiliyor - medyan uc degerlere karsi
@@ -1253,8 +1253,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     const tiles = [
       { label: 'Taranan Fon', value: DATA.length, sub: 'TEFAS' },
       { label: 'Riski Geçen', value: passed.length, sub: (DATA.length - passed.length) + ' elendi' },
-      { label: 'Öne Çıkan', value: strong.length, sub: 'skor ≥ 70' },
-      { label: 'İzlemede', value: watch.length, sub: 'skor 40–69' },
+      { label: 'Öne Çıkan', value: strong.length, sub: 'skor ≥ 90' },
+      { label: 'İzlemede', value: watch.length, sub: 'skor 70–89' },
       { label: 'Medyan Akış/Büyüklük', value: medyanFlow == null ? '—' : (medyanFlow > 0 ? '+' : '') + medyanFlow.toFixed(1) + '%', sub: '~30 günlük, tipik fon', cls: medyanFlow > 0 ? 'pos' : medyanFlow < 0 ? 'neg' : '' },
       { label: 'En Yüksek Skor', value: top ? top.fonKodu : '—', sub: top ? top.toplam_skor.toFixed(1) + ' puan' : '' },
       { label: 'Veri Uyarısı', value: uyarili.length, sub: uyarili.length ? 'kontrol et' : 'temiz', cls: uyarili.length ? 'neg' : 'pos' },
@@ -1571,11 +1571,11 @@ def write_excel_report(rows, run_date_str, output_path: Path):
     if last_row >= 5:
         ws.conditional_formatting.add(
             f"E5:E{last_row}",
-            CellIsRule(operator="greaterThanOrEqual", formula=["70"],
+            CellIsRule(operator="greaterThanOrEqual", formula=["90"],
                        fill=PatternFill("solid", fgColor="8EA9DB")))
         ws.conditional_formatting.add(
             f"E5:E{last_row}",
-            CellIsRule(operator="between", formula=["40", "69.9"],
+            CellIsRule(operator="between", formula=["70", "89.9"],
                        fill=PatternFill("solid", fgColor="A9D18E")))
         for col_letter in ("I", "J"):
             ws.conditional_formatting.add(
