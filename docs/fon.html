@@ -607,6 +607,17 @@
     return 'weak';
   }
 
+  // 2000+ satirlik tabloyu HER tus vurusunda tam yeniden cizmek (sort+filter+innerHTML)
+  // hizli yazarken belirgin bir takilma hissi yaratiyordu - metin/sayi girislerini kisa
+  // bir gecikmeyle (debounce) toparlayip son degerle TEK render() cagirmak bunu cozer.
+  function debounce(fn, gecikmeMs) {
+    let zamanlayici;
+    return (...args) => {
+      clearTimeout(zamanlayici);
+      zamanlayici = setTimeout(() => fn(...args), gecikmeMs);
+    };
+  }
+
   function fmtPct(v, digits) {
     if (v == null) return '<span class="ret zero">—</span>';
     const cls = v > 0.05 ? 'pos' : v < -0.05 ? 'neg' : 'zero';
@@ -746,8 +757,9 @@
     render();
   }
 
+  const debouncedRender = debounce(render, 150);
   [rangeKeySel, rangeMinInput, rangeMaxInput].forEach(el => {
-    el.addEventListener('input', () => { updateRangeState(); render(); });
+    el.addEventListener('input', () => { updateRangeState(); debouncedRender(); });
     el.addEventListener('change', () => { updateRangeState(); render(); });
   });
   rangeMinInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') filtreEkle(); });
@@ -899,7 +911,7 @@
     }).join('');
   }
 
-  searchInput.addEventListener('input', render);
+  searchInput.addEventListener('input', debouncedRender);
   turSel.addEventListener('change', render);
   riskToggle.addEventListener('change', render);
   veriUyariToggle.addEventListener('change', render);
