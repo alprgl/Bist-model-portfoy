@@ -1239,7 +1239,14 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     const strong = passed.filter(d => d.toplam_skor >= 70);
     const watch = passed.filter(d => d.toplam_skor >= 40 && d.toplam_skor < 70);
     const withFlow = passed.filter(d => d.akis_oran_pct != null);
-    const avgFlow = withFlow.length ? withFlow.reduce((a, d) => a + d.akis_oran_pct, 0) / withFlow.length : null;
+    // Aritmetik ortalama, birkac asiri uc deger (orn. pay bolunmesi kaynakli %5000+ akis)
+    // tarafindan komple domine edilip anlamsizlasabiliyor - medyan uc degerlere karsi
+    // dayanikli, "tipik fon" icin cok daha temsili bir ozet.
+    const flowSirali = withFlow.map(d => d.akis_oran_pct).sort((a, b) => a - b);
+    const n = flowSirali.length;
+    const medyanFlow = n === 0 ? null : n % 2 === 1
+      ? flowSirali[(n - 1) / 2]
+      : (flowSirali[n / 2 - 1] + flowSirali[n / 2]) / 2;
     const top = [...passed].sort((a, b) => (b.toplam_skor ?? -1) - (a.toplam_skor ?? -1))[0];
     const uyarili = DATA.filter(d => d.veri_uyari_var);
 
@@ -1248,7 +1255,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       { label: 'Riski Geçen', value: passed.length, sub: (DATA.length - passed.length) + ' elendi' },
       { label: 'Öne Çıkan', value: strong.length, sub: 'skor ≥ 70' },
       { label: 'İzlemede', value: watch.length, sub: 'skor 40–69' },
-      { label: 'Ort. Akış/Büyüklük', value: avgFlow == null ? '—' : (avgFlow > 0 ? '+' : '') + avgFlow.toFixed(1) + '%', sub: '~30 günlük', cls: avgFlow > 0 ? 'pos' : avgFlow < 0 ? 'neg' : '' },
+      { label: 'Medyan Akış/Büyüklük', value: medyanFlow == null ? '—' : (medyanFlow > 0 ? '+' : '') + medyanFlow.toFixed(1) + '%', sub: '~30 günlük, tipik fon', cls: medyanFlow > 0 ? 'pos' : medyanFlow < 0 ? 'neg' : '' },
       { label: 'En Yüksek Skor', value: top ? top.fonKodu : '—', sub: top ? top.toplam_skor.toFixed(1) + ' puan' : '' },
       { label: 'Veri Uyarısı', value: uyarili.length, sub: uyarili.length ? 'kontrol et' : 'temiz', cls: uyarili.length ? 'neg' : 'pos' },
       { label: 'Favorilerim', value: favoriler.size, sub: favoriler.size ? '★ ile gör' : 'yıldızla ekle' },
