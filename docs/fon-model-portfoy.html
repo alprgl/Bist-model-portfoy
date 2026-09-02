@@ -201,14 +201,14 @@
 
   <div class="disclaimer">
     <span>⚠️</span>
-    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, aylık getirisi türü içinde en yüksek olan ve son ~1 ayda net para girişi alan, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
+    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, Toplam Skoru 80+ olan, ~1 aylık getirisi %15+ olan, son ~1 ayda net para girişi alan ve getirisi haftalıktan yıllığa kadar her dönemde hızlanan (tek seferlik bir sıçrama değil, giderek güçlenen bir trend), risk filtresini geçen, aylık getirisi türü içinde en yüksek olan ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
   </div>
 
   <section class="stats" id="stats"></section>
 
   <h2>Şu Anki Sepet</h2>
   <div class="fon-grid" id="fon-grid"></div>
-  <div class="empty-note" id="empty-note" style="display:none;">Henüz bir model portföy oluşturulmadı — ilk çalıştırmada oluşturulacak.</div>
+  <div class="empty-note" id="empty-note" style="display:none;">Şu an seçim kriterlerinin (bkz. yukarısı) tamamını karşılayan fon yok — sepet bir sonraki rebalance'ta yeniden değerlendirilecek.</div>
 
   <h2>Geçmiş Dönemler (Gerçekleşen Getiri)</h2>
   <div class="table-wrap">
@@ -231,7 +231,7 @@
 </div>
 
 <script>
-  const PORTFOLIO = [{"rebalance_date": "2026-09-02", "fonKodu": "CVL", "fonUnvan": "A1 CAPİTAL PORTFÖY ÇOKLU VARLIK KATILIM FONU", "tur": "Katılım Şemsiye Fonu", "entry_price": 1.595447, "entry_getiri_1h": 3.24419503091281, "entry_getiri_1a": 22.311585603321664, "entry_net_akis": 51092551.11181, "gerekce": "aylık getirisi %22.31; haftalık getirisi %3.24; son ~1 ayda net 51,092,551 TL para girişi aldı", "current_price": 1.595447, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "KHP", "fonUnvan": "KUVEYT TÜRK PORTFÖY PAYLAŞIMLI HESAP PARA PİYASASI KATILIM FONU", "tur": "Para Piyasası Şemsiye Fonu", "entry_price": 1.218756, "entry_getiri_1h": 1.0015157404130786, "entry_getiri_1a": 4.35037236310583, "entry_net_akis": 43128104.64073679, "gerekce": "aylık getirisi %4.35; haftalık getirisi %1.00; son ~1 ayda net 43,128,105 TL para girişi aldı", "current_price": 1.218756, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "FSU", "fonUnvan": "TERA PORTFÖY FON SEPETİ FONU", "tur": "Fon Sepeti Şemsiye Fonu", "entry_price": 1.411306, "entry_getiri_1h": 1.0460400831677052, "entry_getiri_1a": 17.488407715425016, "entry_net_akis": 551021282.897416, "gerekce": "aylık getirisi %17.49; haftalık getirisi %1.05; son ~1 ayda net 551,021,283 TL para girişi aldı", "current_price": 1.411306, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "KMN", "fonUnvan": "YAPI KREDİ PORTFÖY KIYMETLİ MADENLER KATILIM FONU", "tur": "Kıymetli Madenler Şemsiye Fonu", "entry_price": 0.971494, "entry_getiri_1h": -2.795387780259189, "entry_getiri_1a": 13.039603084842478, "entry_net_akis": 105702.6559930006, "gerekce": "aylık getirisi %13.04; haftalık getirisi %-2.80; son ~1 ayda net 105,703 TL para girişi aldı", "current_price": 0.971494, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "BCO", "fonUnvan": "BULLS PORTFÖY ÇOKLU VARLIK KATILIM FONU", "tur": "Katılım Şemsiye Fonu", "entry_price": 2.023654, "entry_getiri_1h": -2.0133311769997846, "entry_getiri_1a": 14.952125387404912, "entry_net_akis": 88158436.67493701, "gerekce": "aylık getirisi %14.95; haftalık getirisi %-2.01; son ~1 ayda net 88,158,437 TL para girişi aldı", "current_price": 2.023654, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "PNU", "fonUnvan": "PUSULA PORTFÖY İKİNCİ PARA PİYASASI (TL) FONU", "tur": "Para Piyasası Şemsiye Fonu", "entry_price": 1.25586, "entry_getiri_1h": 1.008671145538668, "entry_getiri_1a": 4.177260446469232, "entry_net_akis": 9089549262.461912, "gerekce": "aylık getirisi %4.18; haftalık getirisi %1.01; son ~1 ayda net 9,089,549,262 TL para girişi aldı", "current_price": 1.25586, "unrealized_return_pct": 0.0, "days_held": 0}];
+  const PORTFOLIO = [{"rebalance_date": "2026-09-02", "fonKodu": "TMV", "fonUnvan": "TERA PORTFÖY ALGORİTMİK STRATEJİLER SERBEST FON", "tur": "Serbest Şemsiye Fonu", "entry_price": 10.676231, "entry_getiri_1h": 9.747643447531038, "entry_getiri_1a": 25.21450847742287, "entry_net_akis": 7800847404.987458, "gerekce": "toplam skoru 97/100; aylık getirisi %25.21; haftalık getirisi %9.75; getirisi haftalıktan yıllığa kadar her dönemde hızlanıyor; son ~1 ayda net 7,800,847,405 TL para girişi aldı", "current_price": 10.676231, "unrealized_return_pct": 0.0, "days_held": 0}];
   const HISTORY = [];
   const REBALANCE_DAYS = 30;
   const RUN_DATE = "2026-09-02";
