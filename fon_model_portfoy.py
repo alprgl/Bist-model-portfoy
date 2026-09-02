@@ -1316,7 +1316,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   });
 
   const turSel = document.getElementById('tur-filter');
-  const turler = [...new Set(DATA.map(d => d.tur).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
+  const turler = [...new Set(DATA.map(d => d.tur).filter(t => t && t !== 'Bilinmiyor'))].sort((a, b) => a.localeCompare(b, 'tr'));
   turSel.innerHTML = '<option value="">Tüm türler</option>' + turler.map(s => `<option value="${s}">${s}</option>`).join('');
 
   const rangeField = document.getElementById('range-field');
