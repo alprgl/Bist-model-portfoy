@@ -70,6 +70,12 @@ FON_PORTFOLIO_FILE = Path("./fon_portfoy.csv")                # su anki N fonluk
 FON_PORTFOLIO_HISTORY_FILE = Path("./fon_portfoy_gecmis.csv")  # gecmis donemlerin gerceklesen getirisi
 FON_PORTFOLIO_SIZE = 6            # portfoyde kac fon tutulacak
 FON_PORTFOLIO_REBALANCE_DAYS = 30  # bu kadar gun gecince portfoy yeniden olusturulur
+FON_PORTFOLIO_MIN_SKOR = 80.0      # Fon Sepeti'ne girebilmek icin gereken minimum Toplam Skor
+FON_PORTFOLIO_MIN_AYLIK_GETIRI = 15.0  # Fon Sepeti'ne girebilmek icin gereken minimum ~1 aylik getiri (%)
+# Fon Sepeti "hizlanan getiri" kurali: ardisik her donem, bir onceki (daha kisa)
+# donemden KESINLIKLE daha yuksek getiri gostermeli - boylece secilen fon sadece
+# tek bir kisa vadeli sicramaya degil, giderek guclenen gercek bir trende sahip olur.
+FON_PORTFOLIO_HIZLANAN_DONEMLER = ["getiri_1h", "getiri_pct", "getiri_3a", "getiri_6a", "getiri_1y"]
 
 LOOKBACK_DAYS = 30          # getiri/akis hesabi icin kac takvim gunu geriye gidilecek
 RISK_MIN_PORTFOY_BUYUKLUK = 10_000_000.0   # TL - bunun altindaki fonlar ELENIR (kucuk/likit degil)
@@ -640,17 +646,33 @@ def compute_akis_z(gecmis_for_fon, bugunku_akis, min_gozlem: int = AKIS_Z_MIN_GO
 # ayda bir yeniden olusturulur, ve GERCEKLESEN (rebalance ile kapanan donemlerin)
 # getirisi ayri bir CSV'de birikir. YATIRIM TAVSIYESI DEGILDIR.
 
+def fon_hizlanan_getiri_mi(r, donemler=FON_PORTFOLIO_HIZLANAN_DONEMLER):
+    """Fonun getirisinin ardisik her donemde (haftalik < aylik < 3a < 6a < 1y)
+    KESINLIKLE arttigini dogrular - yani performans tek bir kisa vadeli
+    sicramadan degil, giderek guclenen gercek bir trendden geliyor. Herhangi
+    bir donem verisi eksikse (None) False doner - eksik veriyle 'gecti' sayilmaz."""
+    degerler = [r.get(d) for d in donemler]
+    if any(v is None for v in degerler):
+        return False
+    return all(degerler[i] < degerler[i + 1] for i in range(len(degerler) - 1))
+
+
 def fon_secim_gerekcesi(r):
     """Bir fonun Fon Sepeti'ne NEDEN secildigine dair mekanik bir aciklama
-    uretir: haftalik getiri, aylik getiri ve net para girisi - oznel bir
+    uretir: toplam skor, aylik/haftalik getiri ve net para girisi - oznel bir
     tavsiye degil, secim kuralinin (bkz. metodoloji kilavuzu) kisa ozetidir."""
     parcalar = []
+    skor = r.get("toplam_skor")
     g1h, g1a = r.get("getiri_1h"), r.get("getiri_pct")
     akis = r.get("net_akis_tl")
+    if skor is not None:
+        parcalar.append(f"toplam skoru {skor:.0f}/100")
     if g1a is not None:
         parcalar.append(f"aylık getirisi %{g1a:.2f}")
     if g1h is not None:
         parcalar.append(f"haftalık getirisi %{g1h:.2f}")
+    if fon_hizlanan_getiri_mi(r):
+        parcalar.append("getirisi haftalıktan yıllığa kadar her dönemde hızlanıyor")
     if akis is not None:
         parcalar.append(f"son ~1 ayda net {akis:,.0f} TL para girişi aldı")
     if not parcalar:
@@ -714,10 +736,12 @@ def update_fon_model_portfolio(ham_sonuclar, run_date: date):
     """Mevcut fon portfoyunu gunceller: FON_PORTFOLIO_REBALANCE_DAYS gun dolmus
     veya hic portfoy yoksa, "Fon Sepeti" kuralina gore MEKANIK olarak yeniden
     olusturur (eski sepetin gerceklesen getirisini gecmis kaydina yazarak):
-    risk filtresini gecen, veri kalitesi uyarisi OLMAYAN VE son ~1 ayda net
-    para girisi almis fonlar arasindan, ~1 aylik getirisi (tur icindeki
-    yuzdelik dilime gore) en yuksek olan FON_PORTFOLIO_SIZE fon secilir. Her
-    cagrida, mevcut sepetin
+    risk filtresini gecen, veri kalitesi uyarisi OLMAYAN, Toplam Skoru
+    FON_PORTFOLIO_MIN_SKOR ve uzeri, ~1 aylik getirisi
+    FON_PORTFOLIO_MIN_AYLIK_GETIRI ve uzeri, son ~1 ayda net para girisi
+    almis VE getirisi ardisik her donemde (haftalik<aylik<3a<6a<1y) hizlanan
+    fonlar arasindan, ~1 aylik getirisi (tur icindeki yuzdelik dilime gore) en
+    yuksek olan FON_PORTFOLIO_SIZE fon secilir. Her cagrida, mevcut sepetin
     GUNCEL fiyatla anlik (henuz gerceklesmemis) getirisini de hesaplayip doner.
     Doner: (enriched_holdings, just_rebalanced: bool)."""
     run_date_str = run_date.isoformat()
@@ -752,7 +776,10 @@ def update_fon_model_portfolio(ham_sonuclar, run_date: date):
              if r["risk_passed"]
              and not r.get("veri_uyarilari")
              and r.get("aylik_getiri_skor") is not None
-             and r.get("net_akis_tl") is not None and r["net_akis_tl"] > 0),
+             and r.get("toplam_skor") is not None and r["toplam_skor"] >= FON_PORTFOLIO_MIN_SKOR
+             and r.get("getiri_pct") is not None and r["getiri_pct"] >= FON_PORTFOLIO_MIN_AYLIK_GETIRI
+             and r.get("net_akis_tl") is not None and r["net_akis_tl"] > 0
+             and fon_hizlanan_getiri_mi(r)),
             key=lambda r: -r["aylik_getiri_skor"],
         )[:FON_PORTFOLIO_SIZE]
 
@@ -2071,14 +2098,14 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
 
   <div class="disclaimer">
     <span>⚠️</span>
-    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, aylık getirisi türü içinde en yüksek olan ve son ~1 ayda net para girişi alan, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
+    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, Toplam Skoru 80+ olan, ~1 aylık getirisi %15+ olan, son ~1 ayda net para girişi alan ve getirisi haftalıktan yıllığa kadar her dönemde hızlanan (tek seferlik bir sıçrama değil, giderek güçlenen bir trend), risk filtresini geçen, aylık getirisi türü içinde en yüksek olan ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
   </div>
 
   <section class="stats" id="stats"></section>
 
   <h2>Şu Anki Sepet</h2>
   <div class="fon-grid" id="fon-grid"></div>
-  <div class="empty-note" id="empty-note" style="display:none;">Henüz bir model portföy oluşturulmadı — ilk çalıştırmada oluşturulacak.</div>
+  <div class="empty-note" id="empty-note" style="display:none;">Şu an seçim kriterlerinin (bkz. yukarısı) tamamını karşılayan fon yok — sepet bir sonraki rebalance'ta yeniden değerlendirilecek.</div>
 
   <h2>Geçmiş Dönemler (Gerçekleşen Getiri)</h2>
   <div class="table-wrap">
@@ -2650,8 +2677,12 @@ def main():
     portfolio_holdings, just_rebalanced = update_fon_model_portfolio(ham_sonuclar, run_date)
     portfolio_history = load_fon_portfolio_history()
     if just_rebalanced:
-        kodlar = ", ".join(h["fonKodu"] for h in portfolio_holdings)
-        print(f"  -> Model portföy yeniden oluşturuldu ({FON_PORTFOLIO_SIZE} fon): {kodlar}")
+        if portfolio_holdings:
+            kodlar = ", ".join(h["fonKodu"] for h in portfolio_holdings)
+            print(f"  -> Model portföy yeniden oluşturuldu ({len(portfolio_holdings)} fon): {kodlar}")
+        else:
+            print(f"  -> Model portföy yeniden değerlendirildi: seçim kriterlerinin tümünü "
+                  f"karşılayan fon yok, sepet boş.")
     elif portfolio_holdings:
         kalan = FON_PORTFOLIO_REBALANCE_DAYS - portfolio_holdings[0]["days_held"]
         print(f"  -> Mevcut portföy korunuyor (sonraki rebalance ~{kalan} gün sonra).")
