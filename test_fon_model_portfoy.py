@@ -31,7 +31,6 @@ from fon_model_portfoy import (
     n_ay_once,
     guess_fon_turu,
     fon_secim_gerekcesi,
-    fon_hizlanan_getiri_mi,
     SHARPE_VOLATILITE_TABAN,
     AKIS_Z_MIN_GOZLEM,
     RISK_MIN_PORTFOY_BUYUKLUK,
@@ -308,33 +307,6 @@ class TestFonSecimGerekcesi(unittest.TestCase):
     def test_hicbir_deger_yoksa_genel_aciklamaya_duser(self):
         gerekce = fon_secim_gerekcesi({"getiri_1h": None, "getiri_pct": None, "net_akis_tl": None})
         self.assertIn("türü içinde üst dilimde", gerekce)
-
-    def test_hizlanan_getiride_hizlanma_ifadesi_gecer(self):
-        r = {"getiri_1h": 1.0, "getiri_pct": 5.0, "getiri_3a": 10.0, "getiri_6a": 20.0,
-             "getiri_1y": 30.0, "net_akis_tl": 1.0}
-        gerekce = fon_secim_gerekcesi(r)
-        self.assertIn("hızlanıyor", gerekce)
-
-
-class TestFonHizlananGetiriMi(unittest.TestCase):
-    # Fon Sepeti'nin "hizlanan getiri" kurali: haftalik<aylik<3a<6a<1y KESINLIKLE
-    # artan olmali - tek bir kisa vadeli sicramayi degil, giderek guclenen
-    # gercek bir trendi dogrulamak icin.
-    def test_tam_hizlanan_seri_true_doner(self):
-        r = {"getiri_1h": 1.0, "getiri_pct": 5.0, "getiri_3a": 10.0, "getiri_6a": 20.0, "getiri_1y": 30.0}
-        self.assertTrue(fon_hizlanan_getiri_mi(r))
-
-    def test_bir_donem_gerilerse_false_doner(self):
-        r = {"getiri_1h": 1.0, "getiri_pct": 5.0, "getiri_3a": 4.0, "getiri_6a": 20.0, "getiri_1y": 30.0}
-        self.assertFalse(fon_hizlanan_getiri_mi(r))
-
-    def test_esit_donemler_false_doner(self):
-        r = {"getiri_1h": 5.0, "getiri_pct": 5.0, "getiri_3a": 10.0, "getiri_6a": 20.0, "getiri_1y": 30.0}
-        self.assertFalse(fon_hizlanan_getiri_mi(r))
-
-    def test_eksik_donem_false_doner(self):
-        r = {"getiri_1h": 1.0, "getiri_pct": 5.0, "getiri_3a": None, "getiri_6a": 20.0, "getiri_1y": 30.0}
-        self.assertFalse(fon_hizlanan_getiri_mi(r))
 
 
 class TestValidateDataQuality(unittest.TestCase):
