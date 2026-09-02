@@ -30,6 +30,7 @@ from fon_model_portfoy import (
     validate_data_quality,
     n_ay_once,
     guess_fon_turu,
+    fon_secim_gerekcesi,
     SHARPE_VOLATILITE_TABAN,
     AKIS_Z_MIN_GOZLEM,
     RISK_MIN_PORTFOY_BUYUKLUK,
@@ -285,6 +286,31 @@ class TestGuessFonTuru(unittest.TestCase):
     def test_bos_veya_none_none_doner(self):
         self.assertIsNone(guess_fon_turu(""))
         self.assertIsNone(guess_fon_turu(None))
+
+
+class TestFonSecimGerekcesi(unittest.TestCase):
+    # Model Portfoy'e giren her fon icin "neden secildi" metni MEKANIK olarak
+    # (zaten hesaplanmis Katman A/B/C skorlarindan) uretilir - bu testler o
+    # metnin, gercekten yuksek olan katmanlari dogru yansittigini dogrular.
+    def test_yuksek_katman_a_bahsedilir(self):
+        gerekce = fon_secim_gerekcesi({"katman_a_getiri": 92.0, "katman_b_akis": 40.0,
+                                        "katman_c_risk": 30.0, "toplam_skor": 85.0})
+        self.assertIn("Katman A", gerekce)
+        self.assertNotIn("Katman B", gerekce)
+        self.assertNotIn("Katman C", gerekce)
+
+    def test_birden_fazla_yuksek_katman_hepsi_bahsedilir(self):
+        gerekce = fon_secim_gerekcesi({"katman_a_getiri": 90.0, "katman_b_akis": 85.0,
+                                        "katman_c_risk": 88.0, "toplam_skor": 95.0})
+        self.assertIn("Katman A", gerekce)
+        self.assertIn("Katman B", gerekce)
+        self.assertIn("Katman C", gerekce)
+
+    def test_hicbir_katman_80_ustu_degilse_toplam_skora_duser(self):
+        gerekce = fon_secim_gerekcesi({"katman_a_getiri": 60.0, "katman_b_akis": 55.0,
+                                        "katman_c_risk": 50.0, "toplam_skor": 91.0})
+        self.assertIn("toplam skoru", gerekce)
+        self.assertIn("91", gerekce)
 
 
 class TestValidateDataQuality(unittest.TestCase):

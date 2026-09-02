@@ -62,6 +62,15 @@ FON_AKIS_GECMIS_FILE = Path("./fon_akis_gecmis.csv")  # akis z-skoru icin fonun 
 DOCS_DIR = Path(__file__).resolve().parent / "docs"   # GitHub Pages buradan yayinlanir
 GIT_AUTO_PUBLISH = True    # True ise her calistirmada docs/fon.html otomatik commit+push edilir
 
+# MODEL PORTFÖY: mekanik (Toplam Skor'a gore) secilen, aylik yeniden dengelenen,
+# gerceklesen getirisi takip edilen kucuk bir sepet - bist_model_portfoy.py'deki
+# ayni desenin fon karsiligi. YATIRIM TAVSIYESI DEGILDIR; secim kriteri tamamen
+# zaten hesaplanmis/disclosed skor bilesenlerine dayanir (bkz. fon_secim_gerekcesi).
+FON_PORTFOLIO_FILE = Path("./fon_portfoy.csv")                # su anki N fonluk model portfoy
+FON_PORTFOLIO_HISTORY_FILE = Path("./fon_portfoy_gecmis.csv")  # gecmis donemlerin gerceklesen getirisi
+FON_PORTFOLIO_SIZE = 6            # portfoyde kac fon tutulacak
+FON_PORTFOLIO_REBALANCE_DAYS = 30  # bu kadar gun gecince portfoy yeniden olusturulur
+
 LOOKBACK_DAYS = 30          # getiri/akis hesabi icin kac takvim gunu geriye gidilecek
 RISK_MIN_PORTFOY_BUYUKLUK = 10_000_000.0   # TL - bunun altindaki fonlar ELENIR (kucuk/likit degil)
 RISK_MIN_KISI_SAYISI = 10                  # bunun altindaki fonlar ELENIR (halka acik degil / ozel fon)
@@ -620,6 +629,157 @@ def compute_akis_z(gecmis_for_fon, bugunku_akis, min_gozlem: int = AKIS_Z_MIN_GO
     if std <= 1e-9:
         return None
     return (bugunku_akis - ort) / std
+
+
+# =============================================================================
+# MODEL PORTFÖY TAKİBİ (N fonluk, aylık rebalance edilen mekanik sepet)
+# =============================================================================
+#
+# bist_model_portfoy.py'deki ayni desenin fon karsiligi: skoru en yuksek N fon
+# MEKANIK olarak secilir (subjektif bir "en iyisi budur" degerlendirmesi degil),
+# ayda bir yeniden olusturulur, ve GERCEKLESEN (rebalance ile kapanan donemlerin)
+# getirisi ayri bir CSV'de birikir. YATIRIM TAVSIYESI DEGILDIR.
+
+def fon_secim_gerekcesi(r):
+    """Bir fonun Model Portfoy'e NEDEN secildigine dair mekanik bir aciklama
+    uretir - zaten hesaplanmis Katman A/B/C percentile'larinin (bkz. metodoloji
+    kilavuzu) kisa bir ozetidir, oznel bir tavsiye degildir."""
+    parcalar = []
+    ka, kb, kc = r.get("katman_a_getiri"), r.get("katman_b_akis"), r.get("katman_c_risk")
+    if ka is not None and ka >= 80:
+        parcalar.append(f"risk-ayarlı getirisi türü içinde üst dilimde (Katman A: {ka:.0f}/100)")
+    if kb is not None and kb >= 80:
+        parcalar.append(f"para akışı türüne göre güçlü (Katman B: {kb:.0f}/100)")
+    if kc is not None and kc >= 80:
+        parcalar.append(f"risk profili türüne göre düşük (Katman C: {kc:.0f}/100)")
+    if not parcalar:
+        skor = r.get("toplam_skor")
+        parcalar.append(f"toplam skoru türü içinde en yüksekler arasında ({skor:.0f}/100)" if skor is not None
+                         else "toplam skoru türü içinde en yüksekler arasında")
+    return "; ".join(parcalar)
+
+
+def load_fon_portfolio():
+    """fon_portfoy.csv'yi liste olarak okur (yoksa bos liste)."""
+    if not FON_PORTFOLIO_FILE.exists():
+        return []
+    with open(FON_PORTFOLIO_FILE, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["entry_price"] = float(r["entry_price"]) if r["entry_price"] else None
+        r["entry_score"] = float(r["entry_score"]) if r["entry_score"] not in ("", "None") else None
+        for alan in ("katman_a", "katman_b", "katman_c"):
+            r[alan] = float(r[alan]) if r.get(alan) not in ("", "None", None) else None
+    return rows
+
+
+def save_fon_portfolio(holdings):
+    """Su anki portfoyu (rebalance sonrasi) fon_portfoy.csv'ye yazar (ustune yazar)."""
+    with open(FON_PORTFOLIO_FILE, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["rebalance_date", "fonKodu", "fonUnvan", "tur", "entry_price",
+                          "entry_score", "katman_a", "katman_b", "katman_c", "gerekce"])
+        for h in holdings:
+            writer.writerow([h["rebalance_date"], h["fonKodu"], h["fonUnvan"], h["tur"],
+                              h["entry_price"], h["entry_score"], h["katman_a"], h["katman_b"],
+                              h["katman_c"], h["gerekce"]])
+
+
+def load_fon_portfolio_history():
+    """fon_portfoy_gecmis.csv'yi liste olarak okur (yoksa bos liste)."""
+    if not FON_PORTFOLIO_HISTORY_FILE.exists():
+        return []
+    with open(FON_PORTFOLIO_HISTORY_FILE, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["entry_price"] = float(r["entry_price"]) if r["entry_price"] else None
+        r["exit_price"] = float(r["exit_price"]) if r["exit_price"] else None
+        r["getiri_pct"] = float(r["getiri_pct"]) if r["getiri_pct"] else None
+        r["gun_sayisi"] = int(r["gun_sayisi"]) if r["gun_sayisi"] else None
+    return rows
+
+
+def append_fon_portfolio_history(records):
+    """Rebalance ile kapanan donemin gerceklesen getirisini fon_portfoy_gecmis.csv'ye ekler."""
+    file_exists = FON_PORTFOLIO_HISTORY_FILE.exists()
+    with open(FON_PORTFOLIO_HISTORY_FILE, "a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["giris_tarihi", "cikis_tarihi", "fonKodu", "fonUnvan",
+                              "entry_price", "exit_price", "getiri_pct", "gun_sayisi"])
+        for r in records:
+            writer.writerow([r["giris_tarihi"], r["cikis_tarihi"], r["fonKodu"], r["fonUnvan"],
+                              r["entry_price"], r["exit_price"], f"{r['getiri_pct']:.2f}", r["gun_sayisi"]])
+
+
+def update_fon_model_portfolio(ham_sonuclar, run_date: date):
+    """Mevcut fon portfoyunu gunceller: FON_PORTFOLIO_REBALANCE_DAYS gun dolmus
+    veya hic portfoy yoksa, o anki en yuksek Toplam Skor'lu (risk filtresini
+    gecen) FON_PORTFOLIO_SIZE fonla MEKANIK olarak yeniden olusturur (eski
+    sepetin gerceklesen getirisini gecmis kaydina yazarak). Her cagrida, mevcut
+    sepetin GUNCEL fiyat/skorla anlik (henuz gerceklesmemis) getirisini de
+    hesaplayip doner. Doner: (enriched_holdings, just_rebalanced: bool)."""
+    run_date_str = run_date.isoformat()
+    existing = load_fon_portfolio()
+    fon_by_kod = {r["fonKodu"]: r for r in ham_sonuclar}
+
+    needs_rebalance = True
+    if existing:
+        last_date = date.fromisoformat(existing[0]["rebalance_date"])
+        needs_rebalance = (run_date - last_date).days >= FON_PORTFOLIO_REBALANCE_DAYS
+
+    if needs_rebalance:
+        if existing:
+            closed = []
+            for h in existing:
+                guncel = fon_by_kod.get(h["fonKodu"])
+                exit_price = guncel.get("guncel_fiyat") if guncel else None
+                if exit_price and h["entry_price"]:
+                    getiri = (exit_price - h["entry_price"]) / h["entry_price"] * 100.0
+                    closed.append({
+                        "giris_tarihi": h["rebalance_date"], "cikis_tarihi": run_date_str,
+                        "fonKodu": h["fonKodu"], "fonUnvan": h["fonUnvan"],
+                        "entry_price": h["entry_price"], "exit_price": exit_price,
+                        "getiri_pct": getiri,
+                        "gun_sayisi": (run_date - date.fromisoformat(h["rebalance_date"])).days,
+                    })
+            if closed:
+                append_fon_portfolio_history(closed)
+
+        candidates = sorted(
+            (r for r in ham_sonuclar if r["risk_passed"] and r.get("toplam_skor") is not None),
+            key=lambda r: -r["toplam_skor"],
+        )[:FON_PORTFOLIO_SIZE]
+
+        new_holdings = []
+        for r in candidates:
+            new_holdings.append({
+                "rebalance_date": run_date_str, "fonKodu": r["fonKodu"], "fonUnvan": r["fonUnvan"],
+                "tur": r["tur_aciklama"], "entry_price": r["guncel_fiyat"], "entry_score": r["toplam_skor"],
+                "katman_a": r.get("katman_a_getiri"), "katman_b": r.get("katman_b_akis"),
+                "katman_c": r.get("katman_c_risk"), "gerekce": fon_secim_gerekcesi(r),
+            })
+        save_fon_portfolio(new_holdings)
+        current_holdings = new_holdings
+    else:
+        current_holdings = existing
+
+    enriched = []
+    for h in current_holdings:
+        guncel = fon_by_kod.get(h["fonKodu"], {})
+        current_price = guncel.get("guncel_fiyat")
+        ret = None
+        if current_price and h["entry_price"]:
+            ret = (current_price - h["entry_price"]) / h["entry_price"] * 100.0
+        enriched.append({
+            **h,
+            "current_price": current_price,
+            "current_score": guncel.get("toplam_skor"),
+            "unrealized_return_pct": ret,
+            "days_held": (run_date - date.fromisoformat(h["rebalance_date"])).days,
+        })
+
+    return enriched, needs_rebalance
 
 
 # =============================================================================
@@ -1199,7 +1359,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
   <footer>
     <span>Yatırım tavsiyesi değildir — sistematik bir tarama aracıdır. Karar sizindir.</span>
-    <span id="fund-count-footer"></span>
+    <span><a href="fon-model-portfoy.html" style="color:var(--accent);text-decoration:none;">Model Portföy →</a> · <span id="fund-count-footer"></span></span>
   </footer>
 </div>
 
@@ -1657,13 +1817,354 @@ def write_html_dashboard(rows, run_date_str, output_path: Path):
     print(f"HTML panosu yazildi: {output_path}")
 
 
+# =============================================================================
+# MODEL PORTFÖY SAYFASI (ayri, bagimsiz HTML sayfasi)
+# =============================================================================
+
+PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEFAS Fon Model Portföyü</title>
+
+<style>
+  :root {
+    --bg: #F5F5F7;
+    --bg-elevated: #FFFFFF;
+    --bg-sunken: #F5F5F7;
+    --ink: #1D1D1F;
+    --ink-muted: #6E6E73;
+    --ink-faint: #AEAEB2;
+    --border: rgba(0, 0, 0, 0.08);
+    --border-strong: rgba(0, 0, 0, 0.14);
+    --accent: #248A3D;
+    --accent-fill: #34C759;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(52, 199, 89, 0.13);
+    --positive: #248A3D;
+    --positive-bg: rgba(52, 199, 89, 0.13);
+    --negative: #D70015;
+    --negative-bg: rgba(255, 59, 48, 0.12);
+    --warn: #A15C00;
+    --warn-bg: rgba(255, 149, 0, 0.14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 28px -14px rgba(0, 0, 0, 0.16);
+    --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000; --bg-elevated: #1C1C1E; --bg-sunken: #000000;
+      --ink: #F5F5F7; --ink-muted: #98989D; --ink-faint: #636366;
+      --border: rgba(255, 255, 255, 0.09); --border-strong: rgba(255, 255, 255, 0.16);
+      --accent: #30D158; --accent-fill: #30D158; --accent-ink: #00390D;
+      --accent-soft: rgba(48, 209, 88, 0.16);
+      --positive: #30D158; --positive-bg: rgba(48, 209, 88, 0.14);
+      --negative: #FF453A; --negative-bg: rgba(255, 69, 58, 0.14);
+      --warn: #FFD60A; --warn-bg: rgba(255, 214, 10, 0.16);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -16px rgba(0, 0, 0, 0.65);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #000000; --bg-elevated: #1C1C1E; --bg-sunken: #000000;
+    --ink: #F5F5F7; --ink-muted: #98989D; --ink-faint: #636366;
+    --border: rgba(255, 255, 255, 0.09); --border-strong: rgba(255, 255, 255, 0.16);
+    --accent: #30D158; --accent-fill: #30D158; --accent-ink: #00390D;
+    --accent-soft: rgba(48, 209, 88, 0.16);
+    --positive: #30D158; --positive-bg: rgba(48, 209, 88, 0.14);
+    --negative: #FF453A; --negative-bg: rgba(255, 69, 58, 0.14);
+    --warn: #FFD60A; --warn-bg: rgba(255, 214, 10, 0.16);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -16px rgba(0, 0, 0, 0.65);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  .app { max-width: 1080px; margin: 0 auto; padding: 0 clamp(14px, 3vw, 32px) 48px; }
+
+  .masthead {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+    gap: 8px 24px; padding: 26px 2px 18px;
+  }
+  .masthead-id { display: flex; flex-direction: column; gap: 3px; }
+  .eyebrow { font-size: 12.5px; font-weight: 590; letter-spacing: -0.01em; color: var(--accent); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 3vw, 32px); letter-spacing: -0.025em; }
+  .masthead-meta { text-align: right; font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; }
+  .masthead-meta strong { color: var(--ink); font-weight: 600; }
+  .back-link {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 6px;
+    color: var(--accent); font-size: 12.5px; font-weight: 590; text-decoration: none;
+  }
+  .back-link:hover { text-decoration: underline; }
+
+  .disclaimer {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--warn-bg); color: var(--ink); border-radius: 14px;
+    padding: 14px 16px; margin: 4px 0 20px; font-size: 13px; line-height: 1.5;
+  }
+  .disclaimer b { color: var(--warn); }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin: 0 0 24px;
+  }
+  .stat {
+    background: var(--bg-elevated); border-radius: 16px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow);
+  }
+  .stat-label { font-size: 11px; color: var(--ink-muted); font-weight: 590; }
+  .stat-value { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat-value.pos { color: var(--positive); }
+  .stat-value.neg { color: var(--negative); }
+  .stat-sub { font-size: 11.5px; color: var(--ink-faint); }
+
+  h2 { font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -0.015em; margin: 8px 2px 14px; }
+
+  .fon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .fon-card {
+    background: var(--bg-elevated); border-radius: 18px; padding: 18px 20px;
+    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px;
+  }
+  .fon-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .fon-kod { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+  .fon-unvan { font-size: 12.5px; color: var(--ink-muted); margin-top: 2px; line-height: 1.4; }
+  .fon-tur { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 980px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 590; }
+  .fon-skor { text-align: right; flex-shrink: 0; }
+  .fon-skor-num { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .fon-skor-label { font-size: 10px; color: var(--ink-faint); }
+
+  .katman-row { display: flex; gap: 10px; }
+  .katman-item { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .katman-label { font-size: 10px; color: var(--ink-faint); font-weight: 590; }
+  .katman-track { height: 5px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
+  .katman-fill { height: 100%; border-radius: 3px; background: var(--accent); }
+  .katman-val { font-size: 10.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+
+  .gerekce { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; background: var(--bg-sunken); border-radius: 10px; padding: 10px 12px; }
+  .gerekce b { color: var(--ink); font-weight: 590; }
+
+  .fon-card-foot { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--border); padding-top: 10px; }
+  .fiyat-gecis { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .fiyat-gecis b { color: var(--ink); }
+  .getiri { font-family: var(--font-display); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .getiri.pos { color: var(--positive); }
+  .getiri.neg { color: var(--negative); }
+  .gun-bilgisi { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+
+  .table-wrap { border: 1px solid var(--border); border-radius: 16px; background: var(--bg-elevated); box-shadow: var(--shadow); overflow: auto; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; }
+  thead th { background: var(--bg-sunken); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 14px; font-size: 11px; color: var(--ink-muted); font-weight: 590; white-space: nowrap; }
+  thead th.num, td.num { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  td { padding: 10px 14px; font-size: 13px; white-space: nowrap; }
+  td.ticker { font-weight: 590; }
+  .ret.pos { color: var(--positive); }
+  .ret.neg { color: var(--negative); }
+  .ret.zero { color: var(--ink-faint); }
+
+  .empty-note { padding: 24px; text-align: center; color: var(--ink-muted); font-size: 13.5px; background: var(--bg-elevated); border-radius: 16px; box-shadow: var(--shadow); margin-bottom: 24px; }
+
+  footer { padding: 16px 2px; font-size: 11.5px; color: var(--ink-faint); border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 20px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="masthead">
+    <div class="masthead-id">
+      <span class="eyebrow">TEFAS · Model Portföy</span>
+      <h1>Model Portföy</h1>
+      <a class="back-link" href="fon.html">← Tüm fonlar taramasına dön</a>
+    </div>
+    <div class="masthead-meta">
+      Son rebalance: <strong id="rebalance-date">—</strong><br>
+      Tarama tarihi: <strong id="run-date">—</strong>
+    </div>
+  </header>
+
+  <div class="disclaimer">
+    <span>⚠️</span>
+    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, <a href="fon_metodoloji.pdf" style="color:inherit;">skorlama metodolojisinde</a> açıklanan algoritmanın o anki en yüksek Toplam Skor'lu, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans ve mevcut skor, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
+  </div>
+
+  <section class="stats" id="stats"></section>
+
+  <h2>Şu Anki Sepet</h2>
+  <div class="fon-grid" id="fon-grid"></div>
+  <div class="empty-note" id="empty-note" style="display:none;">Henüz bir model portföy oluşturulmadı — ilk çalıştırmada oluşturulacak.</div>
+
+  <h2>Geçmiş Dönemler (Gerçekleşen Getiri)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Kod</th><th>Fon Unvanı</th><th class="num">Giriş</th><th class="num">Çıkış</th>
+          <th class="num">Giriş Fiyatı</th><th class="num">Çıkış Fiyatı</th><th class="num">Getiri</th><th class="num">Gün</th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody"></tbody>
+    </table>
+    <div class="empty-note" id="history-empty" style="display:none; box-shadow:none; border-radius:0;">Henüz kapanan bir dönem yok.</div>
+  </div>
+
+  <footer>
+    <span>Yatırım tavsiyesi değildir — sistematik bir tarama aracıdır. Karar sizindir.</span>
+    <span><a href="fon.html">Tüm fonlar</a> · <a href="fon_metodoloji.pdf">Metodoloji</a></span>
+  </footer>
+</div>
+
+<script>
+  const PORTFOLIO = __PORTFOLIO_DATA__;
+  const HISTORY = __PORTFOLIO_HISTORY__;
+  const REBALANCE_DAYS = __REBALANCE_DAYS__;
+  const RUN_DATE = "__RUN_DATE__";
+
+  document.getElementById('run-date').textContent = RUN_DATE;
+  document.getElementById('rebalance-date').textContent = PORTFOLIO.length ? PORTFOLIO[0].rebalance_date : '—';
+  document.getElementById('portfolio-size-note').textContent = PORTFOLIO.length || '—';
+
+  function fmtPct(v, digits) {
+    if (v == null) return '<span class="ret zero">—</span>';
+    const cls = v > 0.05 ? 'pos' : v < -0.05 ? 'neg' : 'zero';
+    const sign = v > 0 ? '+' : '';
+    return `<span class="ret ${cls}">${sign}${v.toFixed(digits == null ? 1 : digits)}%</span>`;
+  }
+  function fmtNum(v, digits) {
+    if (v == null) return '—';
+    return v.toLocaleString('tr-TR', { minimumFractionDigits: digits == null ? 2 : digits, maximumFractionDigits: digits == null ? 2 : digits });
+  }
+
+  function renderStats() {
+    const el = document.getElementById('stats');
+    if (!PORTFOLIO.length) {
+      el.innerHTML = '<div class="stat"><span class="stat-label">Durum</span><span class="stat-value">—</span><span class="stat-sub">Henüz portföy yok</span></div>';
+      return;
+    }
+    const rets = PORTFOLIO.map(p => p.unrealized_return_pct).filter(v => v != null);
+    const ort = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : null;
+    const gunTutuluyor = PORTFOLIO[0].days_held;
+    const kalanGun = Math.max(0, REBALANCE_DAYS - gunTutuluyor);
+    const tiles = [
+      { label: 'Son Rebalance', value: PORTFOLIO[0].rebalance_date, sub: `${gunTutuluyor} gün önce` },
+      { label: 'Fon Sayısı', value: PORTFOLIO.length, sub: 'eşit ağırlık varsayımıyla' },
+      { label: 'Sepet Getirisi', value: ort == null ? '—' : (ort > 0 ? '+' : '') + ort.toFixed(1) + '%', sub: 'gerçekleşmemiş (unrealized)', cls: ort > 0 ? 'pos' : ort < 0 ? 'neg' : '' },
+      { label: 'Sonraki Rebalance', value: kalanGun + ' gün', sub: `~${REBALANCE_DAYS} günde bir` },
+    ];
+    el.innerHTML = tiles.map(t =>
+      `<div class="stat"><span class="stat-label">${t.label}</span><span class="stat-value ${t.cls || ''}">${t.value}</span><span class="stat-sub">${t.sub}</span></div>`
+    ).join('');
+  }
+
+  function renderFonGrid() {
+    const grid = document.getElementById('fon-grid');
+    const emptyNote = document.getElementById('empty-note');
+    if (!PORTFOLIO.length) {
+      grid.innerHTML = '';
+      emptyNote.style.display = 'block';
+      return;
+    }
+    emptyNote.style.display = 'none';
+    const siraliPortfoy = [...PORTFOLIO].sort((a, b) => (b.unrealized_return_pct ?? -999) - (a.unrealized_return_pct ?? -999));
+    grid.innerHTML = siraliPortfoy.map(p => {
+      const retCls = p.unrealized_return_pct > 0.05 ? 'pos' : p.unrealized_return_pct < -0.05 ? 'neg' : '';
+      const katmanlar = [
+        { label: 'Katman A · Getiri', val: p.katman_a },
+        { label: 'Katman B · Akış', val: p.katman_b },
+        { label: 'Katman C · Risk', val: p.katman_c },
+      ];
+      return `
+      <div class="fon-card">
+        <div class="fon-card-head">
+          <div>
+            <div class="fon-kod">${p.fonKodu}</div>
+            <div class="fon-unvan">${p.fonUnvan || ''}</div>
+            <span class="fon-tur">${p.tur || ''}</span>
+          </div>
+          <div class="fon-skor">
+            <div class="fon-skor-num">${p.entry_score != null ? p.entry_score.toFixed(1) : '—'}</div>
+            <div class="fon-skor-label">giriş skoru</div>
+          </div>
+        </div>
+        <div class="katman-row">
+          ${katmanlar.map(k => `
+            <div class="katman-item">
+              <span class="katman-label">${k.label}</span>
+              <span class="katman-track"><span class="katman-fill" style="width:${Math.max(0, Math.min(100, k.val ?? 0))}%"></span></span>
+              <span class="katman-val">${k.val != null ? k.val.toFixed(0) : '—'}</span>
+            </div>`).join('')}
+        </div>
+        <div class="gerekce"><b>Neden seçildi:</b> ${p.gerekce || '—'}</div>
+        <div class="fon-card-foot">
+          <div>
+            <div class="fiyat-gecis"><b>${fmtNum(p.entry_price, 4)}</b> → <b>${fmtNum(p.current_price, 4)}</b> TL</div>
+            <div class="gun-bilgisi">${p.rebalance_date} · ${p.days_held} gün tutuluyor</div>
+          </div>
+          <div class="getiri ${retCls}">${p.unrealized_return_pct != null ? (p.unrealized_return_pct > 0 ? '+' : '') + p.unrealized_return_pct.toFixed(1) + '%' : '—'}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderHistory() {
+    const tbody = document.getElementById('history-tbody');
+    const emptyEl = document.getElementById('history-empty');
+    if (!HISTORY.length) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = [...HISTORY].reverse().map(h => `
+      <tr>
+        <td class="ticker">${h.fonKodu}</td>
+        <td>${h.fonUnvan || ''}</td>
+        <td class="num">${h.giris_tarihi}</td>
+        <td class="num">${h.cikis_tarihi}</td>
+        <td class="num">${fmtNum(h.entry_price, 4)}</td>
+        <td class="num">${fmtNum(h.exit_price, 4)}</td>
+        <td class="num">${fmtPct(h.getiri_pct)}</td>
+        <td class="num">${h.gun_sayisi ?? '—'}</td>
+      </tr>`).join('');
+  }
+
+  renderStats();
+  renderFonGrid();
+  renderHistory();
+</script>
+</body>
+</html>
+"""
+
+
+def write_fon_portfolio_page(portfolio_holdings, portfolio_history, run_date_str, output_path: Path):
+    """Model Portfoy'u, fon.html'den ayri, bagimsiz bir HTML sayfasina yazar."""
+    portfolio_json = json.dumps(portfolio_holdings, ensure_ascii=False)
+    history_json = json.dumps(portfolio_history, ensure_ascii=False)
+    html = (PORTFOLIO_TEMPLATE
+            .replace("__PORTFOLIO_DATA__", portfolio_json)
+            .replace("__PORTFOLIO_HISTORY__", history_json)
+            .replace("__REBALANCE_DAYS__", str(FON_PORTFOLIO_REBALANCE_DAYS))
+            .replace("__RUN_DATE__", run_date_str))
+    output_path.write_text(html, encoding="utf-8")
+    print(f"Model Portföy sayfası yazıldı: {output_path}")
+
+
 def git_publish(run_date_str):
     """docs/fon.html'i GitHub'a commit+push eder, boylece GitHub Pages uzerindeki
     pano otomatik guncellenir. Repo/remote/kimlik bilgisi eksikse veya push
     basarisiz olursa scripti durdurmadan uyari basar."""
     import subprocess
     repo_dir = Path(__file__).resolve().parent
-    candidate_files = ["docs/fon.html", "fon_skor_gecmis.csv", "fon_akis_gecmis.csv"]
+    candidate_files = ["docs/fon.html", "docs/fon-model-portfoy.html", "fon_skor_gecmis.csv",
+                       "fon_akis_gecmis.csv", "fon_portfoy.csv", "fon_portfoy_gecmis.csv"]
     files_to_add = [f for f in candidate_files if (repo_dir / f).exists()]
     try:
         subprocess.run(
@@ -2065,6 +2566,17 @@ def main():
         r["skor_degisim_1h"] = compute_skor_degisim(gecmis_for_fon, r["toplam_skor"], run_date, 7)
     append_fon_skor_gecmis(ham_sonuclar, run_date)
 
+    print("Model portföy güncelleniyor...")
+    portfolio_holdings, just_rebalanced = update_fon_model_portfolio(ham_sonuclar, run_date)
+    portfolio_history = load_fon_portfolio_history()
+    if just_rebalanced:
+        kodlar = ", ".join(h["fonKodu"] for h in portfolio_holdings)
+        print(f"  -> Model portföy yeniden oluşturuldu ({FON_PORTFOLIO_SIZE} fon): {kodlar}")
+    elif portfolio_holdings:
+        kalan = FON_PORTFOLIO_REBALANCE_DAYS - portfolio_holdings[0]["days_held"]
+        print(f"  -> Mevcut portföy korunuyor (sonraki rebalance ~{kalan} gün sonra).")
+    print()
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTPUT_DIR / f"TEFAS_Fon_Model_Portfoy_{run_date_str.replace('-', '')}.xlsx"
     write_excel_report(ham_sonuclar, run_date_str, out_path)
@@ -2072,13 +2584,20 @@ def main():
     html_path = OUTPUT_DIR / f"TEFAS_Fon_Model_Portfoy_{run_date_str.replace('-', '')}.html"
     write_html_dashboard(ham_sonuclar, run_date_str, html_path)
 
+    portfoy_html_path = OUTPUT_DIR / f"Fon_Model_Portfoy_{run_date_str.replace('-', '')}.html"
+    write_fon_portfolio_page(portfolio_holdings, portfolio_history, run_date_str, portfoy_html_path)
+
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     docs_fon = DOCS_DIR / "fon.html"
     write_html_dashboard(ham_sonuclar, run_date_str, docs_fon)
 
+    docs_portfoy = DOCS_DIR / "fon-model-portfoy.html"
+    write_fon_portfolio_page(portfolio_holdings, portfolio_history, run_date_str, docs_portfoy)
+
     print("\n=== Tamamlandı ===")
     print(f"Excel raporu: {out_path}")
     print(f"HTML panosu: {html_path}")
+    print(f"Model Portföy sayfası: {portfoy_html_path}")
 
     if GIT_AUTO_PUBLISH:
         print("\nGitHub'a yayinlaniyor...")
