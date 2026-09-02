@@ -647,10 +647,10 @@ def fon_secim_gerekcesi(r):
     parcalar = []
     g1h, g1a = r.get("getiri_1h"), r.get("getiri_pct")
     akis = r.get("net_akis_tl")
-    if g1h is not None:
-        parcalar.append(f"haftalık getirisi %{g1h:.2f}")
     if g1a is not None:
         parcalar.append(f"aylık getirisi %{g1a:.2f}")
+    if g1h is not None:
+        parcalar.append(f"haftalık getirisi %{g1h:.2f}")
     if akis is not None:
         parcalar.append(f"son ~1 ayda net {akis:,.0f} TL para girişi aldı")
     if not parcalar:
@@ -715,9 +715,9 @@ def update_fon_model_portfolio(ham_sonuclar, run_date: date):
     veya hic portfoy yoksa, "Fon Sepeti" kuralina gore MEKANIK olarak yeniden
     olusturur (eski sepetin gerceklesen getirisini gecmis kaydina yazarak):
     risk filtresini gecen, veri kalitesi uyarisi OLMAYAN VE son ~1 ayda net
-    para girisi almis fonlar arasindan, haftalik+aylik getirisinin (tur
-    icindeki) yuzdelik dilim ortalamasi en yuksek olan FON_PORTFOLIO_SIZE fon
-    secilir. Her cagrida, mevcut sepetin
+    para girisi almis fonlar arasindan, ~1 aylik getirisi (tur icindeki
+    yuzdelik dilime gore) en yuksek olan FON_PORTFOLIO_SIZE fon secilir. Her
+    cagrida, mevcut sepetin
     GUNCEL fiyatla anlik (henuz gerceklesmemis) getirisini de hesaplayip doner.
     Doner: (enriched_holdings, just_rebalanced: bool)."""
     run_date_str = run_date.isoformat()
@@ -751,9 +751,9 @@ def update_fon_model_portfolio(ham_sonuclar, run_date: date):
             (r for r in ham_sonuclar
              if r["risk_passed"]
              and not r.get("veri_uyarilari")
-             and r.get("kisa_vade_skor") is not None
+             and r.get("aylik_getiri_skor") is not None
              and r.get("net_akis_tl") is not None and r["net_akis_tl"] > 0),
-            key=lambda r: -r["kisa_vade_skor"],
+            key=lambda r: -r["aylik_getiri_skor"],
         )[:FON_PORTFOLIO_SIZE]
 
         new_holdings = []
@@ -2071,7 +2071,7 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
 
   <div class="disclaimer">
     <span>⚠️</span>
-    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, haftalık ve aylık getirisi türü içinde en yüksek olan ve son ~1 ayda net para girişi alan, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
+    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, aylık getirisi türü içinde en yüksek olan ve son ~1 ayda net para girişi alan, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
   </div>
 
   <section class="stats" id="stats"></section>
@@ -2156,8 +2156,8 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
       const retCls = p.unrealized_return_pct > 0.05 ? 'pos' : p.unrealized_return_pct < -0.05 ? 'neg' : '';
       const pctCls = v => v > 0.05 ? 'pos' : v < -0.05 ? 'neg' : '';
       const metrikler = [
-        { label: 'Haftalık Getiri', val: p.entry_getiri_1h, fmt: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: pctCls(p.entry_getiri_1h) },
         { label: 'Aylık Getiri', val: p.entry_getiri_1a, fmt: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: pctCls(p.entry_getiri_1a) },
+        { label: 'Haftalık Getiri', val: p.entry_getiri_1h, fmt: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: pctCls(p.entry_getiri_1h) },
         { label: 'Net Para Girişi', val: p.entry_net_akis, fmt: v => (v > 0 ? '+' : '') + fmtNum(v, 0) + ' TL', cls: pctCls(p.entry_net_akis) },
       ];
       return `
@@ -2581,18 +2581,17 @@ def main():
             r["katman_b_akis"] = None
             r["katman_c_risk"] = None
             r["toplam_skor_ham"] = None
-            r["kisa_vade_skor"] = None
+            r["aylik_getiri_skor"] = None
             continue
 
         getiri_pcts = [p for p in (perc(r, a) for a in GETIRI_ALANLARI) if p is not None]
         r["katman_a_getiri"] = sum(getiri_pcts) / len(getiri_pcts) if getiri_pcts else None
 
-        # Model Portfoy "Fon Sepeti" secimi icin ayri, dar kapsamli bir kompozit:
-        # SADECE haftalik + aylik getirinin (tur icindeki) yuzdelik dilim ortalamasi
-        # - Katman A'daki 3a/6a/1y/sharpe dahil degildir, cunku sepet bilhassa
-        # "haftalik ve aylik getirisi en yuksek" fonlari hedefler.
-        kisa_pcts = [p for p in (perc(r, a) for a in ("getiri_1h", "getiri_pct")) if p is not None]
-        r["kisa_vade_skor"] = sum(kisa_pcts) / len(kisa_pcts) if kisa_pcts else None
+        # Model Portfoy "Fon Sepeti" secimi icin ayri, dar kapsamli bir olcut:
+        # SADECE ~1 aylik getirinin (tur icindeki) yuzdelik dilimi - Katman
+        # A'daki haftalik/3a/6a/1y/sharpe dahil degildir, cunku sepet bilhassa
+        # "aylik getirisi en yuksek" fonlari hedefler.
+        r["aylik_getiri_skor"] = perc(r, "getiri_pct")
 
         akis_pcts = [p for p in (perc(r, a) for a in AKIS_ALANLARI) if p is not None]
         r["katman_b_akis"] = sum(akis_pcts) / len(akis_pcts) if akis_pcts else None
