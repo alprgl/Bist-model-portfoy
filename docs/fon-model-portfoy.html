@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEFAS Fon Model Portföyü</title>
+
+<style>
+  :root {
+    --bg: #F5F5F7;
+    --bg-elevated: #FFFFFF;
+    --bg-sunken: #F5F5F7;
+    --ink: #1D1D1F;
+    --ink-muted: #6E6E73;
+    --ink-faint: #AEAEB2;
+    --border: rgba(0, 0, 0, 0.08);
+    --border-strong: rgba(0, 0, 0, 0.14);
+    --accent: #248A3D;
+    --accent-fill: #34C759;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(52, 199, 89, 0.13);
+    --positive: #248A3D;
+    --positive-bg: rgba(52, 199, 89, 0.13);
+    --negative: #D70015;
+    --negative-bg: rgba(255, 59, 48, 0.12);
+    --warn: #A15C00;
+    --warn-bg: rgba(255, 149, 0, 0.14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 28px -14px rgba(0, 0, 0, 0.16);
+    --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000; --bg-elevated: #1C1C1E; --bg-sunken: #000000;
+      --ink: #F5F5F7; --ink-muted: #98989D; --ink-faint: #636366;
+      --border: rgba(255, 255, 255, 0.09); --border-strong: rgba(255, 255, 255, 0.16);
+      --accent: #30D158; --accent-fill: #30D158; --accent-ink: #00390D;
+      --accent-soft: rgba(48, 209, 88, 0.16);
+      --positive: #30D158; --positive-bg: rgba(48, 209, 88, 0.14);
+      --negative: #FF453A; --negative-bg: rgba(255, 69, 58, 0.14);
+      --warn: #FFD60A; --warn-bg: rgba(255, 214, 10, 0.16);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -16px rgba(0, 0, 0, 0.65);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #000000; --bg-elevated: #1C1C1E; --bg-sunken: #000000;
+    --ink: #F5F5F7; --ink-muted: #98989D; --ink-faint: #636366;
+    --border: rgba(255, 255, 255, 0.09); --border-strong: rgba(255, 255, 255, 0.16);
+    --accent: #30D158; --accent-fill: #30D158; --accent-ink: #00390D;
+    --accent-soft: rgba(48, 209, 88, 0.16);
+    --positive: #30D158; --positive-bg: rgba(48, 209, 88, 0.14);
+    --negative: #FF453A; --negative-bg: rgba(255, 69, 58, 0.14);
+    --warn: #FFD60A; --warn-bg: rgba(255, 214, 10, 0.16);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -16px rgba(0, 0, 0, 0.65);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  .app { max-width: 1080px; margin: 0 auto; padding: 0 clamp(14px, 3vw, 32px) 48px; }
+
+  .masthead {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+    gap: 8px 24px; padding: 26px 2px 18px;
+  }
+  .masthead-id { display: flex; flex-direction: column; gap: 3px; }
+  .eyebrow { font-size: 12.5px; font-weight: 590; letter-spacing: -0.01em; color: var(--accent); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 3vw, 32px); letter-spacing: -0.025em; }
+  .masthead-meta { text-align: right; font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; }
+  .masthead-meta strong { color: var(--ink); font-weight: 600; }
+  .back-link {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 6px;
+    color: var(--accent); font-size: 12.5px; font-weight: 590; text-decoration: none;
+  }
+  .back-link:hover { text-decoration: underline; }
+
+  .disclaimer {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--warn-bg); color: var(--ink); border-radius: 14px;
+    padding: 14px 16px; margin: 4px 0 20px; font-size: 13px; line-height: 1.5;
+  }
+  .disclaimer b { color: var(--warn); }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin: 0 0 24px;
+  }
+  .stat {
+    background: var(--bg-elevated); border-radius: 16px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow);
+  }
+  .stat-label { font-size: 11px; color: var(--ink-muted); font-weight: 590; }
+  .stat-value { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat-value.pos { color: var(--positive); }
+  .stat-value.neg { color: var(--negative); }
+  .stat-sub { font-size: 11.5px; color: var(--ink-faint); }
+
+  h2 { font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -0.015em; margin: 8px 2px 14px; }
+
+  .fon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .fon-card {
+    background: var(--bg-elevated); border-radius: 18px; padding: 18px 20px;
+    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px;
+  }
+  .fon-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .fon-kod { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+  .fon-unvan { font-size: 12.5px; color: var(--ink-muted); margin-top: 2px; line-height: 1.4; }
+  .fon-tur { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 980px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 590; }
+  .fon-skor { text-align: right; flex-shrink: 0; }
+  .fon-skor-num { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .fon-skor-label { font-size: 10px; color: var(--ink-faint); }
+
+  .katman-row { display: flex; gap: 10px; }
+  .katman-item { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .katman-label { font-size: 10px; color: var(--ink-faint); font-weight: 590; }
+  .katman-track { height: 5px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
+  .katman-fill { height: 100%; border-radius: 3px; background: var(--accent); }
+  .katman-val { font-size: 10.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+
+  .gerekce { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; background: var(--bg-sunken); border-radius: 10px; padding: 10px 12px; }
+  .gerekce b { color: var(--ink); font-weight: 590; }
+
+  .fon-card-foot { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--border); padding-top: 10px; }
+  .fiyat-gecis { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .fiyat-gecis b { color: var(--ink); }
+  .getiri { font-family: var(--font-display); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .getiri.pos { color: var(--positive); }
+  .getiri.neg { color: var(--negative); }
+  .gun-bilgisi { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+
+  .table-wrap { border: 1px solid var(--border); border-radius: 16px; background: var(--bg-elevated); box-shadow: var(--shadow); overflow: auto; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; }
+  thead th { background: var(--bg-sunken); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 14px; font-size: 11px; color: var(--ink-muted); font-weight: 590; white-space: nowrap; }
+  thead th.num, td.num { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  td { padding: 10px 14px; font-size: 13px; white-space: nowrap; }
+  td.ticker { font-weight: 590; }
+  .ret.pos { color: var(--positive); }
+  .ret.neg { color: var(--negative); }
+  .ret.zero { color: var(--ink-faint); }
+
+  .empty-note { padding: 24px; text-align: center; color: var(--ink-muted); font-size: 13.5px; background: var(--bg-elevated); border-radius: 16px; box-shadow: var(--shadow); margin-bottom: 24px; }
+
+  footer { padding: 16px 2px; font-size: 11.5px; color: var(--ink-faint); border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 20px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="masthead">
+    <div class="masthead-id">
+      <span class="eyebrow">TEFAS · Model Portföy</span>
+      <h1>Model Portföy</h1>
+      <a class="back-link" href="fon.html">← Tüm fonlar taramasına dön</a>
+    </div>
+    <div class="masthead-meta">
+      Son rebalance: <strong id="rebalance-date">—</strong><br>
+      Tarama tarihi: <strong id="run-date">—</strong>
+    </div>
+  </header>
+
+  <div class="disclaimer">
+    <span>⚠️</span>
+    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, <a href="fon_metodoloji.pdf" style="color:inherit;">skorlama metodolojisinde</a> açıklanan algoritmanın o anki en yüksek Toplam Skor'lu, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans ve mevcut skor, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
+  </div>
+
+  <section class="stats" id="stats"></section>
+
+  <h2>Şu Anki Sepet</h2>
+  <div class="fon-grid" id="fon-grid"></div>
+  <div class="empty-note" id="empty-note" style="display:none;">Henüz bir model portföy oluşturulmadı — ilk çalıştırmada oluşturulacak.</div>
+
+  <h2>Geçmiş Dönemler (Gerçekleşen Getiri)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Kod</th><th>Fon Unvanı</th><th class="num">Giriş</th><th class="num">Çıkış</th>
+          <th class="num">Giriş Fiyatı</th><th class="num">Çıkış Fiyatı</th><th class="num">Getiri</th><th class="num">Gün</th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody"></tbody>
+    </table>
+    <div class="empty-note" id="history-empty" style="display:none; box-shadow:none; border-radius:0;">Henüz kapanan bir dönem yok.</div>
+  </div>
+
+  <footer>
+    <span>Yatırım tavsiyesi değildir — sistematik bir tarama aracıdır. Karar sizindir.</span>
+    <span><a href="fon.html">Tüm fonlar</a> · <a href="fon_metodoloji.pdf">Metodoloji</a></span>
+  </footer>
+</div>
+
+<script>
+  const PORTFOLIO = [{"rebalance_date": "2026-09-02", "fonKodu": "ONN", "fonUnvan": "AKTİF PORTFÖY AKTİF ONİKS SERBEST (TL) FON", "tur": "Serbest Şemsiye Fonu", "entry_price": 6.551136, "entry_score": 99.92378048780488, "katman_a": 84.73281614807864, "katman_b": 95.73170731707317, "katman_c": 77.26117886178861, "gerekce": "risk-ayarlı getirisi türü içinde üst dilimde (Katman A: 85/100); para akışı türüne göre güçlü (Katman B: 96/100)", "current_price": 6.551136, "current_score": 99.92378048780488, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "DVS", "fonUnvan": "DENİZ PORTFÖY KISA VADELİ SERBEST (TL) FON", "tur": "Serbest Şemsiye Fonu", "entry_price": 1.591379, "entry_score": 99.77134146341463, "katman_a": 81.10045250852535, "katman_b": 93.52134146341463, "katman_c": 82.13922764227641, "gerekce": "risk-ayarlı getirisi türü içinde üst dilimde (Katman A: 81/100); para akışı türüne göre güçlü (Katman B: 94/100); risk profili türüne göre düşük (Katman C: 82/100)", "current_price": 1.591379, "current_score": 99.77134146341463, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "ICH", "fonUnvan": "PARDUS PORTFÖY İKİNCİ DEĞİŞKEN FON", "tur": "Değişken Şemsiye Fonu", "entry_price": 2.5131, "entry_score": 99.69325153374233, "katman_a": 95.20882936345787, "katman_b": 96.93251533742331, "katman_c": 63.0879345603272, "gerekce": "risk-ayarlı getirisi türü içinde üst dilimde (Katman A: 95/100); para akışı türüne göre güçlü (Katman B: 97/100)", "current_price": 2.5131, "current_score": 99.69325153374233, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "VKK", "fonUnvan": "VAKIF KATILIM PORTFÖY KİRA SERTİFİKALARI KATILIM FONU", "tur": "Katılım Şemsiye Fonu", "entry_price": 1.097259, "entry_score": 99.68354430379746, "katman_a": 80.02751350479723, "katman_b": 90.50632911392407, "katman_c": 75.21097046413503, "gerekce": "risk-ayarlı getirisi türü içinde üst dilimde (Katman A: 80/100); para akışı türüne göre güçlü (Katman B: 91/100)", "current_price": 1.097259, "current_score": 99.68354430379746, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "BPZ", "fonUnvan": "BULLS PORTFÖY PARA PİYASASI (TL) FONU", "tur": "Para Piyasası Şemsiye Fonu", "entry_price": 1.614141, "entry_score": 99.67105263157895, "katman_a": 94.05179449917546, "katman_b": 95.38275531544092, "katman_c": 44.29824561403509, "gerekce": "risk-ayarlı getirisi türü içinde üst dilimde (Katman A: 94/100); para akışı türüne göre güçlü (Katman B: 95/100)", "current_price": 1.614141, "current_score": 99.67105263157895, "unrealized_return_pct": 0.0, "days_held": 0}, {"rebalance_date": "2026-09-02", "fonKodu": "ARE", "fonUnvan": "İSTANBUL PORTFÖY YABANCI HİSSE SENEDİ FONU", "tur": "Hisse Senedi Şemsiye Fonu", "entry_price": 0.262233, "entry_score": 99.66442953020133, "katman_a": 91.82239020626251, "katman_b": 94.96644295302013, "katman_c": 88.70246085011188, "gerekce": "risk-ayarlı getirisi türü içinde üst dilimde (Katman A: 92/100); para akışı türüne göre güçlü (Katman B: 95/100); risk profili türüne göre düşük (Katman C: 89/100)", "current_price": 0.262233, "current_score": 99.66442953020133, "unrealized_return_pct": 0.0, "days_held": 0}];
+  const HISTORY = [];
+  const REBALANCE_DAYS = 30;
+  const RUN_DATE = "2026-09-02";
+
+  document.getElementById('run-date').textContent = RUN_DATE;
+  document.getElementById('rebalance-date').textContent = PORTFOLIO.length ? PORTFOLIO[0].rebalance_date : '—';
+  document.getElementById('portfolio-size-note').textContent = PORTFOLIO.length || '—';
+
+  function fmtPct(v, digits) {
+    if (v == null) return '<span class="ret zero">—</span>';
+    const cls = v > 0.05 ? 'pos' : v < -0.05 ? 'neg' : 'zero';
+    const sign = v > 0 ? '+' : '';
+    return `<span class="ret ${cls}">${sign}${v.toFixed(digits == null ? 1 : digits)}%</span>`;
+  }
+  function fmtNum(v, digits) {
+    if (v == null) return '—';
+    return v.toLocaleString('tr-TR', { minimumFractionDigits: digits == null ? 2 : digits, maximumFractionDigits: digits == null ? 2 : digits });
+  }
+
+  function renderStats() {
+    const el = document.getElementById('stats');
+    if (!PORTFOLIO.length) {
+      el.innerHTML = '<div class="stat"><span class="stat-label">Durum</span><span class="stat-value">—</span><span class="stat-sub">Henüz portföy yok</span></div>';
+      return;
+    }
+    const rets = PORTFOLIO.map(p => p.unrealized_return_pct).filter(v => v != null);
+    const ort = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : null;
+    const gunTutuluyor = PORTFOLIO[0].days_held;
+    const kalanGun = Math.max(0, REBALANCE_DAYS - gunTutuluyor);
+    const tiles = [
+      { label: 'Son Rebalance', value: PORTFOLIO[0].rebalance_date, sub: `${gunTutuluyor} gün önce` },
+      { label: 'Fon Sayısı', value: PORTFOLIO.length, sub: 'eşit ağırlık varsayımıyla' },
+      { label: 'Sepet Getirisi', value: ort == null ? '—' : (ort > 0 ? '+' : '') + ort.toFixed(1) + '%', sub: 'gerçekleşmemiş (unrealized)', cls: ort > 0 ? 'pos' : ort < 0 ? 'neg' : '' },
+      { label: 'Sonraki Rebalance', value: kalanGun + ' gün', sub: `~${REBALANCE_DAYS} günde bir` },
+    ];
+    el.innerHTML = tiles.map(t =>
+      `<div class="stat"><span class="stat-label">${t.label}</span><span class="stat-value ${t.cls || ''}">${t.value}</span><span class="stat-sub">${t.sub}</span></div>`
+    ).join('');
+  }
+
+  function renderFonGrid() {
+    const grid = document.getElementById('fon-grid');
+    const emptyNote = document.getElementById('empty-note');
+    if (!PORTFOLIO.length) {
+      grid.innerHTML = '';
+      emptyNote.style.display = 'block';
+      return;
+    }
+    emptyNote.style.display = 'none';
+    const siraliPortfoy = [...PORTFOLIO].sort((a, b) => (b.unrealized_return_pct ?? -999) - (a.unrealized_return_pct ?? -999));
+    grid.innerHTML = siraliPortfoy.map(p => {
+      const retCls = p.unrealized_return_pct > 0.05 ? 'pos' : p.unrealized_return_pct < -0.05 ? 'neg' : '';
+      const katmanlar = [
+        { label: 'Katman A · Getiri', val: p.katman_a },
+        { label: 'Katman B · Akış', val: p.katman_b },
+        { label: 'Katman C · Risk', val: p.katman_c },
+      ];
+      return `
+      <div class="fon-card">
+        <div class="fon-card-head">
+          <div>
+            <div class="fon-kod">${p.fonKodu}</div>
+            <div class="fon-unvan">${p.fonUnvan || ''}</div>
+            <span class="fon-tur">${p.tur || ''}</span>
+          </div>
+          <div class="fon-skor">
+            <div class="fon-skor-num">${p.entry_score != null ? p.entry_score.toFixed(1) : '—'}</div>
+            <div class="fon-skor-label">giriş skoru</div>
+          </div>
+        </div>
+        <div class="katman-row">
+          ${katmanlar.map(k => `
+            <div class="katman-item">
+              <span class="katman-label">${k.label}</span>
+              <span class="katman-track"><span class="katman-fill" style="width:${Math.max(0, Math.min(100, k.val ?? 0))}%"></span></span>
+              <span class="katman-val">${k.val != null ? k.val.toFixed(0) : '—'}</span>
+            </div>`).join('')}
+        </div>
+        <div class="gerekce"><b>Neden seçildi:</b> ${p.gerekce || '—'}</div>
+        <div class="fon-card-foot">
+          <div>
+            <div class="fiyat-gecis"><b>${fmtNum(p.entry_price, 4)}</b> → <b>${fmtNum(p.current_price, 4)}</b> TL</div>
+            <div class="gun-bilgisi">${p.rebalance_date} · ${p.days_held} gün tutuluyor</div>
+          </div>
+          <div class="getiri ${retCls}">${p.unrealized_return_pct != null ? (p.unrealized_return_pct > 0 ? '+' : '') + p.unrealized_return_pct.toFixed(1) + '%' : '—'}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderHistory() {
+    const tbody = document.getElementById('history-tbody');
+    const emptyEl = document.getElementById('history-empty');
+    if (!HISTORY.length) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = [...HISTORY].reverse().map(h => `
+      <tr>
+        <td class="ticker">${h.fonKodu}</td>
+        <td>${h.fonUnvan || ''}</td>
+        <td class="num">${h.giris_tarihi}</td>
+        <td class="num">${h.cikis_tarihi}</td>
+        <td class="num">${fmtNum(h.entry_price, 4)}</td>
+        <td class="num">${fmtNum(h.exit_price, 4)}</td>
+        <td class="num">${fmtPct(h.getiri_pct)}</td>
+        <td class="num">${h.gun_sayisi ?? '—'}</td>
+      </tr>`).join('');
+  }
+
+  renderStats();
+  renderFonGrid();
+  renderHistory();
+</script>
+</body>
+</html>
