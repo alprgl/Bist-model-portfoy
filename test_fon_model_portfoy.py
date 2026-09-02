@@ -289,28 +289,24 @@ class TestGuessFonTuru(unittest.TestCase):
 
 
 class TestFonSecimGerekcesi(unittest.TestCase):
-    # Model Portfoy'e giren her fon icin "neden secildi" metni MEKANIK olarak
-    # (zaten hesaplanmis Katman A/B/C skorlarindan) uretilir - bu testler o
-    # metnin, gercekten yuksek olan katmanlari dogru yansittigini dogrular.
-    def test_yuksek_katman_a_bahsedilir(self):
-        gerekce = fon_secim_gerekcesi({"katman_a_getiri": 92.0, "katman_b_akis": 40.0,
-                                        "katman_c_risk": 30.0, "toplam_skor": 85.0})
-        self.assertIn("Katman A", gerekce)
-        self.assertNotIn("Katman B", gerekce)
-        self.assertNotIn("Katman C", gerekce)
+    # Fon Sepeti'ne giren her fon icin "neden secildi" metni MEKANIK olarak
+    # (haftalik getiri, aylik getiri, net para girisi degerlerinden) uretilir -
+    # bu testler metnin bu degerleri dogru yansittigini dogrular.
+    def test_haftalik_ve_aylik_getiri_bahsedilir(self):
+        gerekce = fon_secim_gerekcesi({"getiri_1h": 2.5, "getiri_pct": 8.3, "net_akis_tl": 1_000_000.0})
+        self.assertIn("haftalık getirisi", gerekce)
+        self.assertIn("2.50", gerekce)
+        self.assertIn("aylık getirisi", gerekce)
+        self.assertIn("8.30", gerekce)
 
-    def test_birden_fazla_yuksek_katman_hepsi_bahsedilir(self):
-        gerekce = fon_secim_gerekcesi({"katman_a_getiri": 90.0, "katman_b_akis": 85.0,
-                                        "katman_c_risk": 88.0, "toplam_skor": 95.0})
-        self.assertIn("Katman A", gerekce)
-        self.assertIn("Katman B", gerekce)
-        self.assertIn("Katman C", gerekce)
+    def test_para_girisi_bahsedilir(self):
+        gerekce = fon_secim_gerekcesi({"getiri_1h": 1.0, "getiri_pct": 3.0, "net_akis_tl": 2_500_000.0})
+        self.assertIn("para girişi", gerekce)
+        self.assertIn("2,500,000", gerekce)
 
-    def test_hicbir_katman_80_ustu_degilse_toplam_skora_duser(self):
-        gerekce = fon_secim_gerekcesi({"katman_a_getiri": 60.0, "katman_b_akis": 55.0,
-                                        "katman_c_risk": 50.0, "toplam_skor": 91.0})
-        self.assertIn("toplam skoru", gerekce)
-        self.assertIn("91", gerekce)
+    def test_hicbir_deger_yoksa_genel_aciklamaya_duser(self):
+        gerekce = fon_secim_gerekcesi({"getiri_1h": None, "getiri_pct": None, "net_akis_tl": None})
+        self.assertIn("türü içinde üst dilimde", gerekce)
 
 
 class TestValidateDataQuality(unittest.TestCase):

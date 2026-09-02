@@ -132,29 +132,30 @@
 
   h2 { font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -0.015em; margin: 8px 2px 14px; }
 
-  .fon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .fon-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; }
   .fon-card {
-    background: var(--bg-elevated); border-radius: 18px; padding: 18px 20px;
-    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px;
+    background: var(--bg-elevated); border-radius: 16px; padding: 16px 20px;
+    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
   }
-  .fon-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .fon-row-top { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; }
+  .fon-row-id { display: flex; flex-direction: column; gap: 3px; min-width: 180px; }
   .fon-kod { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
   .fon-unvan { font-size: 12.5px; color: var(--ink-muted); margin-top: 2px; line-height: 1.4; }
-  .fon-tur { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 980px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 590; }
-  .katman-row { display: flex; gap: 10px; }
-  .katman-item { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .fon-tur { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 980px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 590; align-self: flex-start; }
+  .katman-row { display: flex; gap: 22px; flex-wrap: wrap; }
+  .katman-item { display: flex; flex-direction: column; gap: 3px; }
   .katman-label { font-size: 10px; color: var(--ink-faint); font-weight: 590; }
   .katman-val-big { font-family: var(--font-display); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .katman-val-big.pos { color: var(--positive); }
   .katman-val-big.neg { color: var(--negative); }
+  .fon-row-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; margin-left: auto; }
 
   .gerekce { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; background: var(--bg-sunken); border-radius: 10px; padding: 10px 12px; }
   .gerekce b { color: var(--ink); font-weight: 590; }
 
-  .fon-card-foot { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--border); padding-top: 10px; }
   .fiyat-gecis { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
   .fiyat-gecis b { color: var(--ink); }
-  .getiri { font-family: var(--font-display); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .getiri { font-family: var(--font-display); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .getiri.pos { color: var(--positive); }
   .getiri.neg { color: var(--negative); }
   .gun-bilgisi { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
@@ -291,28 +292,26 @@
       ];
       return `
       <div class="fon-card">
-        <div class="fon-card-head">
-          <div>
+        <div class="fon-row-top">
+          <div class="fon-row-id">
             <div class="fon-kod">${p.fonKodu}</div>
             <div class="fon-unvan">${p.fonUnvan || ''}</div>
             <span class="fon-tur">${p.tur || ''}</span>
           </div>
-        </div>
-        <div class="katman-row">
-          ${metrikler.map(m => `
-            <div class="katman-item">
-              <span class="katman-label">${m.label}</span>
-              <span class="katman-val-big ${m.val != null ? m.cls : ''}">${m.val != null ? m.fmt(m.val) : '—'}</span>
-            </div>`).join('')}
-        </div>
-        <div class="gerekce"><b>Neden seçildi:</b> ${p.gerekce || '—'}</div>
-        <div class="fon-card-foot">
-          <div>
+          <div class="katman-row">
+            ${metrikler.map(m => `
+              <div class="katman-item">
+                <span class="katman-label">${m.label}</span>
+                <span class="katman-val-big ${m.val != null ? m.cls : ''}">${m.val != null ? m.fmt(m.val) : '—'}</span>
+              </div>`).join('')}
+          </div>
+          <div class="fon-row-price">
+            <div class="getiri ${retCls}">${p.unrealized_return_pct != null ? (p.unrealized_return_pct > 0 ? '+' : '') + p.unrealized_return_pct.toFixed(1) + '%' : '—'}</div>
             <div class="fiyat-gecis"><b>${fmtNum(p.entry_price, 4)}</b> → <b>${fmtNum(p.current_price, 4)}</b> TL</div>
             <div class="gun-bilgisi">${p.rebalance_date} · ${p.days_held} gün tutuluyor</div>
           </div>
-          <div class="getiri ${retCls}">${p.unrealized_return_pct != null ? (p.unrealized_return_pct > 0 ? '+' : '') + p.unrealized_return_pct.toFixed(1) + '%' : '—'}</div>
         </div>
+        <div class="gerekce"><b>Neden seçildi:</b> ${p.gerekce || '—'}</div>
       </div>`;
     }).join('');
   }

@@ -641,21 +641,20 @@ def compute_akis_z(gecmis_for_fon, bugunku_akis, min_gozlem: int = AKIS_Z_MIN_GO
 # getirisi ayri bir CSV'de birikir. YATIRIM TAVSIYESI DEGILDIR.
 
 def fon_secim_gerekcesi(r):
-    """Bir fonun Model Portfoy'e NEDEN secildigine dair mekanik bir aciklama
-    uretir - zaten hesaplanmis Katman A/B/C percentile'larinin (bkz. metodoloji
-    kilavuzu) kisa bir ozetidir, oznel bir tavsiye degildir."""
+    """Bir fonun Fon Sepeti'ne NEDEN secildigine dair mekanik bir aciklama
+    uretir: haftalik getiri, aylik getiri ve net para girisi - oznel bir
+    tavsiye degil, secim kuralinin (bkz. metodoloji kilavuzu) kisa ozetidir."""
     parcalar = []
-    ka, kb, kc = r.get("katman_a_getiri"), r.get("katman_b_akis"), r.get("katman_c_risk")
-    if ka is not None and ka >= 80:
-        parcalar.append(f"risk-ayarlı getirisi türü içinde üst dilimde (Katman A: {ka:.0f}/100)")
-    if kb is not None and kb >= 80:
-        parcalar.append(f"para akışı türüne göre güçlü (Katman B: {kb:.0f}/100)")
-    if kc is not None and kc >= 80:
-        parcalar.append(f"risk profili türüne göre düşük (Katman C: {kc:.0f}/100)")
+    g1h, g1a = r.get("getiri_1h"), r.get("getiri_pct")
+    akis = r.get("net_akis_tl")
+    if g1h is not None:
+        parcalar.append(f"haftalık getirisi %{g1h:.2f}")
+    if g1a is not None:
+        parcalar.append(f"aylık getirisi %{g1a:.2f}")
+    if akis is not None:
+        parcalar.append(f"son ~1 ayda net {akis:,.0f} TL para girişi aldı")
     if not parcalar:
-        skor = r.get("toplam_skor")
-        parcalar.append(f"toplam skoru türü içinde en yüksekler arasında ({skor:.0f}/100)" if skor is not None
-                         else "toplam skoru türü içinde en yüksekler arasında")
+        parcalar.append("kısa vadeli getiri ve para girişi kriterlerinde türü içinde üst dilimde")
     return "; ".join(parcalar)
 
 
@@ -667,8 +666,7 @@ def load_fon_portfolio():
         rows = list(csv.DictReader(f))
     for r in rows:
         r["entry_price"] = float(r["entry_price"]) if r["entry_price"] else None
-        r["entry_score"] = float(r["entry_score"]) if r["entry_score"] not in ("", "None") else None
-        for alan in ("katman_a", "katman_b", "katman_c"):
+        for alan in ("entry_getiri_1h", "entry_getiri_1a", "entry_net_akis"):
             r[alan] = float(r[alan]) if r.get(alan) not in ("", "None", None) else None
     return rows
 
@@ -678,11 +676,11 @@ def save_fon_portfolio(holdings):
     with open(FON_PORTFOLIO_FILE, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["rebalance_date", "fonKodu", "fonUnvan", "tur", "entry_price",
-                          "entry_score", "katman_a", "katman_b", "katman_c", "gerekce"])
+                          "entry_getiri_1h", "entry_getiri_1a", "entry_net_akis", "gerekce"])
         for h in holdings:
             writer.writerow([h["rebalance_date"], h["fonKodu"], h["fonUnvan"], h["tur"],
-                              h["entry_price"], h["entry_score"], h["katman_a"], h["katman_b"],
-                              h["katman_c"], h["gerekce"]])
+                              h["entry_price"], h["entry_getiri_1h"], h["entry_getiri_1a"],
+                              h["entry_net_akis"], h["gerekce"]])
 
 
 def load_fon_portfolio_history():
@@ -714,11 +712,14 @@ def append_fon_portfolio_history(records):
 
 def update_fon_model_portfolio(ham_sonuclar, run_date: date):
     """Mevcut fon portfoyunu gunceller: FON_PORTFOLIO_REBALANCE_DAYS gun dolmus
-    veya hic portfoy yoksa, o anki en yuksek Toplam Skor'lu (risk filtresini
-    gecen) FON_PORTFOLIO_SIZE fonla MEKANIK olarak yeniden olusturur (eski
-    sepetin gerceklesen getirisini gecmis kaydina yazarak). Her cagrida, mevcut
-    sepetin GUNCEL fiyat/skorla anlik (henuz gerceklesmemis) getirisini de
-    hesaplayip doner. Doner: (enriched_holdings, just_rebalanced: bool)."""
+    veya hic portfoy yoksa, "Fon Sepeti" kuralina gore MEKANIK olarak yeniden
+    olusturur (eski sepetin gerceklesen getirisini gecmis kaydina yazarak):
+    risk filtresini gecen, veri kalitesi uyarisi OLMAYAN VE son ~1 ayda net
+    para girisi almis fonlar arasindan, haftalik+aylik getirisinin (tur
+    icindeki) yuzdelik dilim ortalamasi en yuksek olan FON_PORTFOLIO_SIZE fon
+    secilir. Her cagrida, mevcut sepetin
+    GUNCEL fiyatla anlik (henuz gerceklesmemis) getirisini de hesaplayip doner.
+    Doner: (enriched_holdings, just_rebalanced: bool)."""
     run_date_str = run_date.isoformat()
     existing = load_fon_portfolio()
     fon_by_kod = {r["fonKodu"]: r for r in ham_sonuclar}
@@ -747,17 +748,21 @@ def update_fon_model_portfolio(ham_sonuclar, run_date: date):
                 append_fon_portfolio_history(closed)
 
         candidates = sorted(
-            (r for r in ham_sonuclar if r["risk_passed"] and r.get("toplam_skor") is not None),
-            key=lambda r: -r["toplam_skor"],
+            (r for r in ham_sonuclar
+             if r["risk_passed"]
+             and not r.get("veri_uyarilari")
+             and r.get("kisa_vade_skor") is not None
+             and r.get("net_akis_tl") is not None and r["net_akis_tl"] > 0),
+            key=lambda r: -r["kisa_vade_skor"],
         )[:FON_PORTFOLIO_SIZE]
 
         new_holdings = []
         for r in candidates:
             new_holdings.append({
                 "rebalance_date": run_date_str, "fonKodu": r["fonKodu"], "fonUnvan": r["fonUnvan"],
-                "tur": r["tur_aciklama"], "entry_price": r["guncel_fiyat"], "entry_score": r["toplam_skor"],
-                "katman_a": r.get("katman_a_getiri"), "katman_b": r.get("katman_b_akis"),
-                "katman_c": r.get("katman_c_risk"), "gerekce": fon_secim_gerekcesi(r),
+                "tur": r["tur_aciklama"], "entry_price": r["guncel_fiyat"],
+                "entry_getiri_1h": r.get("getiri_1h"), "entry_getiri_1a": r.get("getiri_pct"),
+                "entry_net_akis": r.get("net_akis_tl"), "gerekce": fon_secim_gerekcesi(r),
             })
         save_fon_portfolio(new_holdings)
         current_holdings = new_holdings
@@ -774,7 +779,6 @@ def update_fon_model_portfolio(ham_sonuclar, run_date: date):
         enriched.append({
             **h,
             "current_price": current_price,
-            "current_score": guncel.get("toplam_skor"),
             "unrealized_return_pct": ret,
             "days_held": (run_date - date.fromisoformat(h["rebalance_date"])).days,
         })
@@ -901,9 +905,36 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
   }
 
+  .layout { display: flex; }
+  .sidebar {
+    flex-shrink: 0; width: 200px; height: 100vh; position: sticky; top: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 22px 12px; border-right: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+  .sidebar-brand {
+    font-family: var(--font-display); font-weight: 700; font-size: 15px;
+    letter-spacing: -0.01em; padding: 6px 10px 22px;
+  }
+  .sidebar-link {
+    display: flex; align-items: center; padding: 10px 12px; border-radius: 10px;
+    color: var(--ink-muted); text-decoration: none; font-size: 14px; font-weight: 590;
+    transition: background 0.15s, color 0.15s;
+  }
+  .sidebar-link:hover { background: var(--bg-sunken); color: var(--ink); }
+  .sidebar-link.active { background: var(--accent-soft); color: var(--accent); }
+  .sidebar-link.secondary {
+    margin-top: auto; color: var(--ink-faint); font-size: 12.5px; font-weight: 500;
+    padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .sidebar-link.secondary:hover { color: var(--ink-muted); }
+
   .app {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    width: 100%;
+    min-width: 0;
     height: 100vh;
     max-width: 1440px;
     margin: 0 auto;
@@ -1290,10 +1321,25 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   @media (max-width: 760px) {
     .app { height: auto; min-height: 100vh; }
     .table-wrap { flex: none; }
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: auto; height: auto; position: relative; flex-direction: row;
+      align-items: center; overflow-x: auto; border-right: none;
+      border-bottom: 1px solid var(--border); padding: 10px 12px; gap: 4px;
+    }
+    .sidebar-brand { padding: 6px 10px; }
+    .sidebar-link.secondary { margin-top: 0; border-top: none; padding-top: 10px; }
   }
 </style>
 </head>
 <body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand">TEFAS by alprgl</div>
+    <a class="sidebar-link active" href="fon.html">TEFAS Fonları</a>
+    <a class="sidebar-link" href="fon-model-portfoy.html">Model Portföy</a>
+    <a class="sidebar-link secondary" href="fon_metodoloji.pdf">Metodoloji</a>
+  </nav>
 <div class="app">
   <header class="masthead">
     <div class="masthead-id">
@@ -1359,8 +1405,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
   <footer>
     <span>Yatırım tavsiyesi değildir — sistematik bir tarama aracıdır. Karar sizindir.</span>
-    <span><a href="fon-model-portfoy.html" style="color:var(--accent);text-decoration:none;">Model Portföy →</a> · <span id="fund-count-footer"></span></span>
+    <span id="fund-count-footer"></span>
   </footer>
+</div>
 </div>
 
 <script>
@@ -1886,7 +1933,41 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
   }
-  .app { max-width: 1080px; margin: 0 auto; padding: 0 clamp(14px, 3vw, 32px) 48px; }
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    flex-shrink: 0; width: 200px; height: 100vh; position: sticky; top: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 22px 12px; border-right: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+  .sidebar-brand {
+    font-family: var(--font-display); font-weight: 700; font-size: 15px;
+    letter-spacing: -0.01em; padding: 6px 10px 22px;
+  }
+  .sidebar-link {
+    display: flex; align-items: center; padding: 10px 12px; border-radius: 10px;
+    color: var(--ink-muted); text-decoration: none; font-size: 14px; font-weight: 590;
+    transition: background 0.15s, color 0.15s;
+  }
+  .sidebar-link:hover { background: var(--bg-sunken); color: var(--ink); }
+  .sidebar-link.active { background: var(--accent-soft); color: var(--accent); }
+  .sidebar-link.secondary {
+    margin-top: auto; color: var(--ink-faint); font-size: 12.5px; font-weight: 500;
+    padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .sidebar-link.secondary:hover { color: var(--ink-muted); }
+  @media (max-width: 760px) {
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: auto; height: auto; position: relative; flex-direction: row;
+      align-items: center; overflow-x: auto; border-right: none;
+      border-bottom: 1px solid var(--border); padding: 10px 12px; gap: 4px;
+    }
+    .sidebar-brand { padding: 6px 10px; }
+    .sidebar-link.secondary { margin-top: 0; border-top: none; padding-top: 10px; }
+  }
+
+  .app { flex: 1; width: 100%; min-width: 0; max-width: 1080px; margin: 0 auto; padding: 0 clamp(14px, 3vw, 32px) 48px; }
 
   .masthead {
     display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
@@ -1897,11 +1978,6 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
   h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 3vw, 32px); letter-spacing: -0.025em; }
   .masthead-meta { text-align: right; font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; }
   .masthead-meta strong { color: var(--ink); font-weight: 600; }
-  .back-link {
-    display: inline-flex; align-items: center; gap: 4px; margin-top: 6px;
-    color: var(--accent); font-size: 12.5px; font-weight: 590; text-decoration: none;
-  }
-  .back-link:hover { text-decoration: underline; }
 
   .disclaimer {
     display: flex; gap: 10px; align-items: flex-start;
@@ -1926,38 +2002,35 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
 
   h2 { font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -0.015em; margin: 8px 2px 14px; }
 
-  .fon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .fon-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; }
   .fon-card {
-    background: var(--bg-elevated); border-radius: 18px; padding: 18px 20px;
-    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px;
+    background: var(--bg-elevated); border-radius: 16px; padding: 16px 20px;
+    box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
   }
-  .fon-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .fon-row-top { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; }
+  .fon-row-id { display: flex; flex-direction: column; gap: 3px; min-width: 180px; }
   .fon-kod { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
   .fon-unvan { font-size: 12.5px; color: var(--ink-muted); margin-top: 2px; line-height: 1.4; }
-  .fon-tur { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 980px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 590; }
-  .fon-skor { text-align: right; flex-shrink: 0; }
-  .fon-skor-num { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
-  .fon-skor-label { font-size: 10px; color: var(--ink-faint); }
-
-  .katman-row { display: flex; gap: 10px; }
-  .katman-item { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .fon-tur { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 980px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 590; align-self: flex-start; }
+  .katman-row { display: flex; gap: 22px; flex-wrap: wrap; }
+  .katman-item { display: flex; flex-direction: column; gap: 3px; }
   .katman-label { font-size: 10px; color: var(--ink-faint); font-weight: 590; }
-  .katman-track { height: 5px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
-  .katman-fill { height: 100%; border-radius: 3px; background: var(--accent); }
-  .katman-val { font-size: 10.5px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .katman-val-big { font-family: var(--font-display); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .katman-val-big.pos { color: var(--positive); }
+  .katman-val-big.neg { color: var(--negative); }
+  .fon-row-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; margin-left: auto; }
 
   .gerekce { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; background: var(--bg-sunken); border-radius: 10px; padding: 10px 12px; }
   .gerekce b { color: var(--ink); font-weight: 590; }
 
-  .fon-card-foot { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--border); padding-top: 10px; }
   .fiyat-gecis { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
   .fiyat-gecis b { color: var(--ink); }
-  .getiri { font-family: var(--font-display); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .getiri { font-family: var(--font-display); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .getiri.pos { color: var(--positive); }
   .getiri.neg { color: var(--negative); }
   .gun-bilgisi { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
 
-  .table-wrap { border: 1px solid var(--border); border-radius: 16px; background: var(--bg-elevated); box-shadow: var(--shadow); overflow: auto; margin-bottom: 24px; }
+  .table-wrap { width: 100%; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-elevated); box-shadow: var(--shadow); overflow: auto; margin-bottom: 24px; }
   table { border-collapse: collapse; width: 100%; min-width: 640px; }
   thead th { background: var(--bg-sunken); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 14px; font-size: 11px; color: var(--ink-muted); font-weight: 590; white-space: nowrap; }
   thead th.num, td.num { text-align: right; }
@@ -1977,12 +2050,18 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand">TEFAS by alprgl</div>
+    <a class="sidebar-link" href="fon.html">TEFAS Fonları</a>
+    <a class="sidebar-link active" href="fon-model-portfoy.html">Model Portföy</a>
+    <a class="sidebar-link secondary" href="fon_metodoloji.pdf">Metodoloji</a>
+  </nav>
 <div class="app">
   <header class="masthead">
     <div class="masthead-id">
       <span class="eyebrow">TEFAS · Model Portföy</span>
       <h1>Model Portföy</h1>
-      <a class="back-link" href="fon.html">← Tüm fonlar taramasına dön</a>
     </div>
     <div class="masthead-meta">
       Son rebalance: <strong id="rebalance-date">—</strong><br>
@@ -1992,7 +2071,7 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
 
   <div class="disclaimer">
     <span>⚠️</span>
-    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, <a href="fon_metodoloji.pdf" style="color:inherit;">skorlama metodolojisinde</a> açıklanan algoritmanın o anki en yüksek Toplam Skor'lu, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans ve mevcut skor, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
+    <span><b>Yatırım tavsiyesi değildir.</b> Burada listelenen fonlar, haftalık ve aylık getirisi türü içinde en yüksek olan ve son ~1 ayda net para girişi alan, risk filtresini geçen ~<span id="portfolio-size-note">N</span> fonudur — <a href="fon_metodoloji.pdf" style="color:inherit;">metodolojide</a> açıklanan mekanik bir seçimdir, kişisel bir öneri değildir. Geçmiş performans, gelecekteki getiriyi garanti etmez. Karar sizindir.</span>
   </div>
 
   <section class="stats" id="stats"></section>
@@ -2017,8 +2096,8 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
 
   <footer>
     <span>Yatırım tavsiyesi değildir — sistematik bir tarama aracıdır. Karar sizindir.</span>
-    <span><a href="fon.html">Tüm fonlar</a> · <a href="fon_metodoloji.pdf">Metodoloji</a></span>
   </footer>
+</div>
 </div>
 
 <script>
@@ -2075,40 +2154,34 @@ PORTFOLIO_TEMPLATE = """<!DOCTYPE html>
     const siraliPortfoy = [...PORTFOLIO].sort((a, b) => (b.unrealized_return_pct ?? -999) - (a.unrealized_return_pct ?? -999));
     grid.innerHTML = siraliPortfoy.map(p => {
       const retCls = p.unrealized_return_pct > 0.05 ? 'pos' : p.unrealized_return_pct < -0.05 ? 'neg' : '';
-      const katmanlar = [
-        { label: 'Katman A · Getiri', val: p.katman_a },
-        { label: 'Katman B · Akış', val: p.katman_b },
-        { label: 'Katman C · Risk', val: p.katman_c },
+      const pctCls = v => v > 0.05 ? 'pos' : v < -0.05 ? 'neg' : '';
+      const metrikler = [
+        { label: 'Haftalık Getiri', val: p.entry_getiri_1h, fmt: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: pctCls(p.entry_getiri_1h) },
+        { label: 'Aylık Getiri', val: p.entry_getiri_1a, fmt: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: pctCls(p.entry_getiri_1a) },
+        { label: 'Net Para Girişi', val: p.entry_net_akis, fmt: v => (v > 0 ? '+' : '') + fmtNum(v, 0) + ' TL', cls: pctCls(p.entry_net_akis) },
       ];
       return `
       <div class="fon-card">
-        <div class="fon-card-head">
-          <div>
+        <div class="fon-row-top">
+          <div class="fon-row-id">
             <div class="fon-kod">${p.fonKodu}</div>
             <div class="fon-unvan">${p.fonUnvan || ''}</div>
             <span class="fon-tur">${p.tur || ''}</span>
           </div>
-          <div class="fon-skor">
-            <div class="fon-skor-num">${p.entry_score != null ? p.entry_score.toFixed(1) : '—'}</div>
-            <div class="fon-skor-label">giriş skoru</div>
+          <div class="katman-row">
+            ${metrikler.map(m => `
+              <div class="katman-item">
+                <span class="katman-label">${m.label}</span>
+                <span class="katman-val-big ${m.val != null ? m.cls : ''}">${m.val != null ? m.fmt(m.val) : '—'}</span>
+              </div>`).join('')}
           </div>
-        </div>
-        <div class="katman-row">
-          ${katmanlar.map(k => `
-            <div class="katman-item">
-              <span class="katman-label">${k.label}</span>
-              <span class="katman-track"><span class="katman-fill" style="width:${Math.max(0, Math.min(100, k.val ?? 0))}%"></span></span>
-              <span class="katman-val">${k.val != null ? k.val.toFixed(0) : '—'}</span>
-            </div>`).join('')}
-        </div>
-        <div class="gerekce"><b>Neden seçildi:</b> ${p.gerekce || '—'}</div>
-        <div class="fon-card-foot">
-          <div>
+          <div class="fon-row-price">
+            <div class="getiri ${retCls}">${p.unrealized_return_pct != null ? (p.unrealized_return_pct > 0 ? '+' : '') + p.unrealized_return_pct.toFixed(1) + '%' : '—'}</div>
             <div class="fiyat-gecis"><b>${fmtNum(p.entry_price, 4)}</b> → <b>${fmtNum(p.current_price, 4)}</b> TL</div>
             <div class="gun-bilgisi">${p.rebalance_date} · ${p.days_held} gün tutuluyor</div>
           </div>
-          <div class="getiri ${retCls}">${p.unrealized_return_pct != null ? (p.unrealized_return_pct > 0 ? '+' : '') + p.unrealized_return_pct.toFixed(1) + '%' : '—'}</div>
         </div>
+        <div class="gerekce"><b>Neden seçildi:</b> ${p.gerekce || '—'}</div>
       </div>`;
     }).join('');
   }
@@ -2508,10 +2581,18 @@ def main():
             r["katman_b_akis"] = None
             r["katman_c_risk"] = None
             r["toplam_skor_ham"] = None
+            r["kisa_vade_skor"] = None
             continue
 
         getiri_pcts = [p for p in (perc(r, a) for a in GETIRI_ALANLARI) if p is not None]
         r["katman_a_getiri"] = sum(getiri_pcts) / len(getiri_pcts) if getiri_pcts else None
+
+        # Model Portfoy "Fon Sepeti" secimi icin ayri, dar kapsamli bir kompozit:
+        # SADECE haftalik + aylik getirinin (tur icindeki) yuzdelik dilim ortalamasi
+        # - Katman A'daki 3a/6a/1y/sharpe dahil degildir, cunku sepet bilhassa
+        # "haftalik ve aylik getirisi en yuksek" fonlari hedefler.
+        kisa_pcts = [p for p in (perc(r, a) for a in ("getiri_1h", "getiri_pct")) if p is not None]
+        r["kisa_vade_skor"] = sum(kisa_pcts) / len(kisa_pcts) if kisa_pcts else None
 
         akis_pcts = [p for p in (perc(r, a) for a in AKIS_ALANLARI) if p is not None]
         r["katman_b_akis"] = sum(akis_pcts) / len(akis_pcts) if akis_pcts else None
