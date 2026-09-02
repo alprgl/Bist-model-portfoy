@@ -113,6 +113,30 @@
     * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
   }
 
+  .layout { display: flex; }
+  .sidebar {
+    flex-shrink: 0; width: 200px; height: 100vh; position: sticky; top: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 22px 12px; border-right: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+  .sidebar-brand {
+    font-family: var(--font-display); font-weight: 700; font-size: 15px;
+    letter-spacing: -0.01em; padding: 6px 10px 22px;
+  }
+  .sidebar-link {
+    display: flex; align-items: center; padding: 10px 12px; border-radius: 10px;
+    color: var(--ink-muted); text-decoration: none; font-size: 14px; font-weight: 590;
+    transition: background 0.15s, color 0.15s;
+  }
+  .sidebar-link:hover { background: var(--bg-sunken); color: var(--ink); }
+  .sidebar-link.active { background: var(--accent-soft); color: var(--accent); }
+  .sidebar-link.secondary {
+    margin-top: auto; color: var(--ink-faint); font-size: 12.5px; font-weight: 500;
+    padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .sidebar-link.secondary:hover { color: var(--ink-muted); }
+
   .app {
     display: flex;
     flex-direction: column;
@@ -502,10 +526,25 @@
   @media (max-width: 760px) {
     .app { height: auto; min-height: 100vh; }
     .table-wrap { flex: none; }
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: auto; height: auto; position: relative; flex-direction: row;
+      align-items: center; overflow-x: auto; border-right: none;
+      border-bottom: 1px solid var(--border); padding: 10px 12px; gap: 4px;
+    }
+    .sidebar-brand { padding: 6px 10px; }
+    .sidebar-link.secondary { margin-top: 0; border-top: none; padding-top: 10px; }
   }
 </style>
 </head>
 <body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand">TEFAS by alprgl</div>
+    <a class="sidebar-link active" href="fon.html">TEFAS Fonları</a>
+    <a class="sidebar-link" href="fon-model-portfoy.html">Model Portföy</a>
+    <a class="sidebar-link secondary" href="fon_metodoloji.pdf">Metodoloji</a>
+  </nav>
 <div class="app">
   <header class="masthead">
     <div class="masthead-id">
@@ -571,8 +610,9 @@
 
   <footer>
     <span>Yatırım tavsiyesi değildir — sistematik bir tarama aracıdır. Karar sizindir.</span>
-    <span><a href="fon-model-portfoy.html" style="color:var(--accent);text-decoration:none;">Model Portföy →</a> · <span id="fund-count-footer"></span></span>
+    <span id="fund-count-footer"></span>
   </footer>
+</div>
 </div>
 
 <script>
