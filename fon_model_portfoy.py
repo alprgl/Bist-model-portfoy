@@ -151,11 +151,25 @@ TUR_ANAHTAR_KELIMELER = [
     ("GARANTİLİ", 103), ("KORUMA AMAÇLI", 103),
     ("FON SEPETİ", 102),
     ("SERBEST", 108),
-    ("HİSSE SENEDİ", 104), ("HİSSE SENEDI", 104),
+    ("HİSSE SENEDİ", 104),
     ("BORÇLANMA", 100), ("TAHVİL", 100), ("BONO", 100),
     ("KARMA", 110),
     ("DEĞİŞKEN", 101),
 ]
+
+
+# TEFAS'ta bazi fon unvanlari Turkce noktali "İ" yerine ASCII noktasiz "I" iceriyor
+# (orn. "DEĞIŞKEN" yazilmis, dogru Turkce yazimi "DEĞİŞKEN" olmasina ragmen - muhtemelen
+# fon adi Turkce olmayan bir klavye/yerel ayarla girilmis). Python'un varsayilan
+# .upper()'i bu ikisini AYNI harfe indirgemiyor (ı/i -> ASCII I, İ ise oldugu gibi kalir),
+# bu yuzden dogru yazilmis anahtar kelimeler ("DEĞİŞKEN", "SEPETİ" gibi) bu fonlarda
+# sessizce eslesmiyordu. Tum I varyantlarini (İ/I/ı/i) TEK bir harfe indirgeyen "gevsek"
+# bir buyuk harfe cevirme kullanarak bunu cozuyoruz.
+_TR_I_GEVSEK_CEVIRI = str.maketrans({"İ": "I", "ı": "I", "i": "I"})
+
+
+def _tr_upper_gevsek(s: str) -> str:
+    return s.translate(_TR_I_GEVSEK_CEVIRI).upper()
 
 
 def guess_fon_turu(fon_unvan: str):
@@ -164,9 +178,9 @@ def guess_fon_turu(fon_unvan: str):
     kullanilir). Eslesme yoksa None doner."""
     if not fon_unvan:
         return None
-    unvan_buyuk = fon_unvan.upper()
+    unvan_buyuk = _tr_upper_gevsek(fon_unvan)
     for anahtar, sfon_tur in TUR_ANAHTAR_KELIMELER:
-        if anahtar in unvan_buyuk:
+        if _tr_upper_gevsek(anahtar) in unvan_buyuk:
             return sfon_tur
     return None
 

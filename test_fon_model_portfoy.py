@@ -29,6 +29,7 @@ from fon_model_portfoy import (
     compute_skor_degisim,
     validate_data_quality,
     n_ay_once,
+    guess_fon_turu,
     SHARPE_VOLATILITE_TABAN,
     AKIS_Z_MIN_GOZLEM,
     RISK_MIN_PORTFOY_BUYUKLUK,
@@ -260,6 +261,30 @@ class TestNAyOnce(unittest.TestCase):
     def test_yil_donumu(self):
         self.assertEqual(n_ay_once(date(2026, 1, 15), 1), date(2025, 12, 15))
         self.assertEqual(n_ay_once(date(2026, 1, 15), 13), date(2024, 12, 15))
+
+
+class TestGuessFonTuru(unittest.TestCase):
+    # TEFAS'ta bazi fon unvanlari Turkce noktali "İ" yerine ASCII noktasiz "I"
+    # iceriyor (orn. gercek bir vaka: "ÜNLÜ PORTFÖY ÜÇÜNCÜ DEĞIŞKEN FON" - dogru
+    # yazim "DEĞİŞKEN" olmasina ragmen). Bu, guess_fon_turu'nun 5 fonu "Bilinmiyor"
+    # olarak siniflandirmasina yol acan gercek bir regresyondu.
+    def test_doğru_yazim_eslesir(self):
+        self.assertEqual(guess_fon_turu("XYZ PORTFÖY BİRİNCİ DEĞİŞKEN FON"), 101)
+
+    def test_noktasiz_i_ile_de_eslesir(self):
+        self.assertEqual(guess_fon_turu("ÜNLÜ PORTFÖY ÜÇÜNCÜ DEĞIŞKEN FON"), 101)
+        self.assertEqual(guess_fon_turu("BULLS PORTFÖY ATAK DEĞIŞKEN FON"), 101)
+
+    def test_fon_sepeti_noktasiz_i_ile_eslesir(self):
+        self.assertEqual(guess_fon_turu("HSBC PORTFÖY YABANCI BYF FON SEPETI"), 102)
+        self.assertEqual(guess_fon_turu("AK PORTFÖY GÜMÜŞ FON SEPETI FONU"), 102)
+
+    def test_eslesmeyen_unvan_none_doner(self):
+        self.assertIsNone(guess_fon_turu("TAMAMEN ALAKASIZ BIR METIN"))
+
+    def test_bos_veya_none_none_doner(self):
+        self.assertIsNone(guess_fon_turu(""))
+        self.assertIsNone(guess_fon_turu(None))
 
 
 class TestValidateDataQuality(unittest.TestCase):
