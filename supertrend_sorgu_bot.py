@@ -142,11 +142,12 @@ def format_all(results):
     lines = ["<b>📊 BIST 30 - Anlık Supertrend Durumu (1S)</b>", now_str, ""]
     lines.append(f"🟢 Yükseliş trendinde ({len(up)}):")
     for r in up:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f} yüksek)")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f} üzerinde)")
     lines.append("")
     lines.append(f"🔴 Düşüş trendinde ({len(down)}, AL'a en yakın üstte):")
     for r in down:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{abs(r['mesafe_pct']):.1f} düşük)")
+        # Telegram HTML parse_mode "<" karakterini etiket sanip mesaji reddeder, &lt; olarak kacir.
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f} altında)")
     return "\n".join(lines)
 
 
