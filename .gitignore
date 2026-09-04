@@ -2,3 +2,6 @@ ciktilar/
 __pycache__/
 *.pyc
 .DS_Store
+telegram_config.json
+supertrend_alarm_state.json
+supertrend_alarm.log
