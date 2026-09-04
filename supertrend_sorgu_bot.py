@@ -18,7 +18,7 @@ KOMUTLAR (Telegram'dan bota yaz)
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
-    /yardim         -> komut listesini gösterir
+    /help           -> komut listesini gösterir
 
 Güvenlik: sadece telegram_config.json'daki chat_id'den gelen komutlara
 cevap verir, başka biri botu bulup yazsa bile yanıt almaz.
@@ -60,7 +60,7 @@ HELP_TEXT = (
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
-    "<b>/yardim</b>\n"
+    "<b>/help</b>\n"
     "Bu mesajı gösterir."
 )
 
@@ -245,12 +245,12 @@ def main():
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
-            elif text in ("/yardim", "/help", "/start"):
-                print("Komut alindi: /yardim")
+            elif text == "/help":
+                print("Komut alindi: /help")
                 send_telegram_message(token, chat_id, HELP_TEXT)
             elif text.startswith("/"):
                 print(f"Bilinmeyen komut: {text}")
-                send_telegram_message(token, chat_id, "Bilinmeyen komut. Komutları görmek için /yardim yaz.")
+                send_telegram_message(token, chat_id, "Bilinmeyen komut. Komutları görmek için /help yaz.")
 
 
 if __name__ == "__main__":
