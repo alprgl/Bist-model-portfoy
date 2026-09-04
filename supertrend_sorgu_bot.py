@@ -142,12 +142,20 @@ def format_all(results):
     lines = ["<b>📊 BIST 30 - Anlık Supertrend Durumu (1S)</b>", now_str, ""]
     lines.append(f"🟢 Yükseliş trendinde ({len(up)}):")
     for r in up:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (çizginin %{r['mesafe_pct']:.1f} üzerinde)")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f}{format_mesafe_ek(r['mesafe_pct'])}")
     lines.append("")
     lines.append(f"🔴 Düşüş trendinde ({len(down)}, AL'a en yakın üstte):")
     for r in down:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (çizginin %{abs(r['mesafe_pct']):.1f} altında)")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f}{format_mesafe_ek(abs(r['mesafe_pct']))}")
     return "\n".join(lines)
+
+
+def format_mesafe_ek(mesafe):
+    if mesafe < 2:
+        return " (çizgiye < %2)"
+    if mesafe > 3:
+        return " (çizgiye > %3)"
+    return ""
 
 
 def handle_durum(token, chat_id, arg):
