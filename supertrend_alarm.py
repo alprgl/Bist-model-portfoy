@@ -142,7 +142,10 @@ def get_closed_candles(ticker, interval, range_):
 
 def resample_ohlc(candles, group_size):
     """Ardışık mumları, her borsa günü içinde group_size'lık gruplara
-    ayırıp birleştirir (örn. 4 saatlik mum için 60 dakikalık mumlardan)."""
+    ayırıp birleştirir (örn. 4 saatlik mum için 60 dakikalık mumlardan).
+    Günün son grubu group_size'dan az mum içerse bile (oluşmakta olan
+    güncel mum olarak) dahil edilir - aksi halde günün en son verisi
+    (bugünkü kapanış dahil) tamamen atılmış olur."""
     by_day = defaultdict(list)
     for c in candles:
         by_day[c[0].astimezone(ISTANBUL_TZ).date()].append(c)
@@ -150,8 +153,7 @@ def resample_ohlc(candles, group_size):
     grouped = []
     for day in sorted(by_day):
         day_candles = sorted(by_day[day], key=lambda c: c[0])
-        full_groups = (len(day_candles) // group_size) * group_size
-        for i in range(0, full_groups, group_size):
+        for i in range(0, len(day_candles), group_size):
             chunk = day_candles[i:i + group_size]
             grouped.append((
                 chunk[-1][0],
