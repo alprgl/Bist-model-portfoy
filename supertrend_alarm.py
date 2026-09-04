@@ -274,15 +274,6 @@ def detect_buy_signal(st_series):
     return None
 
 
-def count_buy_signals(st_series):
-    """st_series: compute_supertrend() çıktısı. Serinin tamamında yönün
-    -1'den +1'e döndüğü (AL sinyali) an sayısını döner."""
-    return sum(
-        1 for i in range(1, len(st_series))
-        if st_series[i - 1][3] == -1 and st_series[i][3] == 1
-    )
-
-
 def load_state():
     if STATE_FILE.exists():
         try:
