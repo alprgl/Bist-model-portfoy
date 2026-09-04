@@ -80,8 +80,8 @@ def http_get_json(url, headers=None):
 
 
 def fetch_candles(ticker, interval, range_):
-    """Yahoo Finance'ten OHLC mum serisi çeker (kapanmamış son mum dahil).
-    Döner: [(datetime_utc, open, high, low, close), ...] artan zamanlı."""
+    """Yahoo Finance'ten OHLCV mum serisi çeker (kapanmamış son mum dahil).
+    Döner: [(datetime_utc, open, high, low, close, volume), ...] artan zamanlı."""
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.IS"
            f"?range={range_}&interval={interval}")
     try:
@@ -97,7 +97,8 @@ def fetch_candles(ticker, interval, range_):
         o, h, l, c = quote["open"][i], quote["high"][i], quote["low"][i], quote["close"][i]
         if None in (o, h, l, c):
             continue
-        candles.append((datetime.fromtimestamp(ts, tz=timezone.utc), o, h, l, c))
+        v = quote["volume"][i] or 0
+        candles.append((datetime.fromtimestamp(ts, tz=timezone.utc), o, h, l, c, v))
     candles.sort(key=lambda x: x[0])
     return candles
 
@@ -159,8 +160,33 @@ def resample_ohlc(candles, group_size):
                 max(x[2] for x in chunk),
                 min(x[3] for x in chunk),
                 chunk[-1][4],
+                sum(x[5] for x in chunk),
             ))
     return grouped
+
+
+def last_traded_candle(candles):
+    """Hacmi 0 olmayan (BIST'in kapanış müzayedesi mumu hariç) son mum."""
+    for c in reversed(candles):
+        if c[5] > 0:
+            return c
+    return None
+
+
+def volume_ratio(candles, lookback=20):
+    """Son gerçek işlem hacmi taşıyan mumu, ondan önceki lookback mumun
+    ortalama hacmiyle kıyaslar (kaç katı). Yetersiz veri varsa None döner."""
+    ref = last_traded_candle(candles)
+    if ref is None:
+        return None
+    idx = candles.index(ref)
+    if idx < lookback:
+        return None
+    volumes = [c[5] for c in candles]
+    avg = sum(volumes[idx - lookback:idx]) / lookback
+    if avg <= 0:
+        return None
+    return ref[5] / avg
 
 
 def get_timeframe_candles(ticker, label):
@@ -181,6 +207,9 @@ def get_timeframe_status(ticker, label):
     if not st:
         return None
     dt, close, st_val, direction = st[-1]
+    oran = volume_ratio(candles)
+    vol_candle = last_traded_candle(candles)
+    yuksek_hacim = bool(oran and vol_candle and oran >= 2.0 and vol_candle[4] > vol_candle[1])
     return {
         "ticker": ticker,
         "zaman_dilimi": label,
@@ -189,6 +218,8 @@ def get_timeframe_status(ticker, label):
         "supertrend": st_val,
         "yon": direction,
         "mesafe_pct": (close - st_val) / st_val * 100.0,
+        "hacim_orani": oran,
+        "yuksek_hacim": yuksek_hacim,
     }
 
 

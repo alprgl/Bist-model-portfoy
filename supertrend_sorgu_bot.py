@@ -37,12 +37,8 @@ from pathlib import Path
 
 from supertrend_alarm import (
     BIST30_TICKERS,
-    ISTANBUL_TZ,
     REQUEST_DELAY_SEC,
-    TIMEFRAME_CONFIG,
     TIMEFRAME_LABELS_ORDERED,
-    compute_supertrend,
-    get_closed_candles,
     get_timeframe_status,
     load_telegram_config,
     send_telegram_message,
@@ -98,24 +94,6 @@ def get_updates(token, offset):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def current_status(ticker):
-    """Ticker icin en son kapanmis (1 saatlik) mumdaki anlik Supertrend durumu."""
-    interval, range_ = TIMEFRAME_CONFIG["1s"]
-    candles = get_closed_candles(ticker, interval, range_)
-    st = compute_supertrend(candles)
-    if not st:
-        return None
-    dt, close, st_val, direction = st[-1]
-    return {
-        "ticker": ticker,
-        "mum_zamani": dt.astimezone(ISTANBUL_TZ),
-        "kapanis": close,
-        "supertrend": st_val,
-        "yon": direction,
-        "mesafe_pct": (close - st_val) / st_val * 100.0,
-    }
-
-
 def format_all(results):
     up = sorted([r for r in results if r["yon"] == 1], key=lambda r: r["mesafe_pct"])
     down = sorted([r for r in results if r["yon"] == -1], key=lambda r: abs(r["mesafe_pct"]))
@@ -124,12 +102,16 @@ def format_all(results):
     lines = ["<b>📊 BIST 30 - Anlık Supertrend Durumu (1S)</b>", now_str, ""]
     lines.append(f"🟢 Yükseliş trendinde ({len(up)}):")
     for r in up:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f})")
+        hacim = " 🔥" if r["yuksek_hacim"] else ""
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f}){hacim}")
     lines.append("")
     lines.append(f"🔴 Düşüş trendinde ({len(down)}, AL'a en yakın üstte):")
     for r in down:
+        hacim = " 🔥" if r["yuksek_hacim"] else ""
         # Telegram HTML parse_mode "<" karakterini etiket sanip mesaji reddeder, &lt; olarak kacir.
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f})")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f}){hacim}")
+    lines.append("")
+    lines.append("🔥 = son mumda ortalamanın 2 katından fazla hacimle yükseliş (yüksek para girişi)")
     return "\n".join(lines)
 
 
@@ -147,7 +129,10 @@ def format_multi(ticker, results):
             lines.append(f"{name}: veri yok")
             continue
         yon_emoji = "🟢" if s["yon"] == 1 else "🔴"
-        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f})")
+        hacim = " 🔥" if s["yuksek_hacim"] else ""
+        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f}){hacim}")
+    lines.append("")
+    lines.append("🔥 = o zaman diliminde ortalamanın 2 katından fazla hacimle yükseliş")
     return "\n".join(lines)
 
 
@@ -167,7 +152,7 @@ def handle_durum(token, chat_id, arg):
         send_telegram_message(token, chat_id, "Taranıyor, birkaç saniye sürecek...")
         results = []
         for t in BIST30_TICKERS:
-            s = current_status(t)
+            s = get_timeframe_status(t, "1s")
             time.sleep(REQUEST_DELAY_SEC)
             if s:
                 results.append(s)
