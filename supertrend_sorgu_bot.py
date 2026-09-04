@@ -13,15 +13,12 @@ KeepAlive ile arka planda hep açık tutulur).
 
 KOMUTLAR (Telegram'dan bota yaz)
 ---------------------------------
-    /durum          -> BIST 30 + izleme listesindeki hisselerin anlık (1S) trend yönü
+    /durum          -> BIST 30'daki tüm hisselerin anlık (1S) trend yönü
     /durum THYAO    -> tek bir hissenin anlık (1S) detayı
     /coklu THYAO    -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
-    /izle           -> izleme listesini göster
-    /izle EKLE X    -> X hissesini izleme listesine ekle (BIST'te işlem gören her hisse)
-    /izle SIL X     -> X hissesini izleme listesinden çıkar
-    /liste          -> BIST 30 + izleme listesini tüm zaman dilimlerinde tarar,
-                        şu an en çok zaman diliminde AL bölgesinde olan
-                        hisseleri sıralar (0-6 arası puan, kendi seçer)
+    /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
+                        zaman diliminde AL bölgesinde olan hisseleri sıralar
+                        (0-6 arası puan, kendi seçer)
     /yardim         -> komut listesini gösterir
 
 Güvenlik: sadece telegram_config.json'daki chat_id'den gelen komutlara
@@ -39,17 +36,15 @@ import urllib.request
 from pathlib import Path
 
 from supertrend_alarm import (
+    BIST30_TICKERS,
     ISTANBUL_TZ,
     REQUEST_DELAY_SEC,
     TIMEFRAME_CONFIG,
     TIMEFRAME_LABELS_ORDERED,
     compute_supertrend,
     get_closed_candles,
-    get_scan_universe,
     get_timeframe_status,
     load_telegram_config,
-    load_watchlist,
-    save_watchlist,
     send_telegram_message,
 )
 
@@ -61,19 +56,13 @@ TIMEFRAME_NAMES = {
 HELP_TEXT = (
     "<b>🤖 Supertrend Sorgu Botu - Komutlar</b>\n\n"
     "<b>/durum</b>\n"
-    "BIST 30 + izleme listesindeki tüm hisselerin anlık (1 saatlik) trend yönünü listeler.\n\n"
+    "BIST 30'daki tüm hisselerin anlık (1 saatlik) trend yönünü listeler.\n\n"
     "<b>/durum HISSE</b>  (örn. /durum THYAO)\n"
     "Tek bir hissenin anlık (1 saatlik) Supertrend detayını gösterir.\n\n"
     "<b>/coklu HISSE</b>  (örn. /coklu THYAO)\n"
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
-    "<b>/izle</b>\n"
-    "İzleme listesindeki hisseleri gösterir.\n\n"
-    "<b>/izle EKLE HISSE</b>\n"
-    "BIST'te işlem gören herhangi bir hisseyi izleme listesine ekler (bu hisse hem /durum taramasına hem periyodik AL sinyali alarmına dahil olur).\n\n"
-    "<b>/izle SIL HISSE</b>\n"
-    "Hisseyi izleme listesinden çıkarır.\n\n"
     "<b>/liste</b>\n"
-    "BIST 30 + izleme listesindeki hisseleri 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
+    "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
     "<b>/yardim</b>\n"
     "Bu mesajı gösterir."
 )
@@ -162,7 +151,7 @@ def handle_durum(token, chat_id, arg):
     else:
         send_telegram_message(token, chat_id, "Taranıyor, birkaç saniye sürecek...")
         results = []
-        for t in get_scan_universe():
+        for t in BIST30_TICKERS:
             s = current_status(t)
             time.sleep(REQUEST_DELAY_SEC)
             if s:
@@ -204,46 +193,6 @@ def handle_coklu(token, chat_id, arg):
     send_telegram_message(token, chat_id, format_multi(ticker, results))
 
 
-def handle_izle(token, chat_id, arg):
-    parts = arg.split()
-    if not parts:
-        watchlist = load_watchlist()
-        if not watchlist:
-            send_telegram_message(token, chat_id, "İzleme listesi boş. Eklemek için: /izle EKLE HISSE")
-        else:
-            send_telegram_message(token, chat_id, "<b>👁 İzleme Listesi</b>\n" + "\n".join(watchlist))
-        return
-
-    action = parts[0].upper()
-    if action == "EKLE" and len(parts) >= 2:
-        ticker = parts[1].strip().upper()
-        watchlist = load_watchlist()
-        if ticker in watchlist:
-            send_telegram_message(token, chat_id, f"{ticker} zaten izleme listesinde.")
-            return
-        interval, range_ = TIMEFRAME_CONFIG["1g"]
-        if not get_closed_candles(ticker, interval, range_):
-            send_telegram_message(token, chat_id, f"'{ticker}' için veri bulunamadı, hisse kodunu kontrol et.")
-            return
-        watchlist.append(ticker)
-        save_watchlist(watchlist)
-        send_telegram_message(token, chat_id, f"{ticker} izleme listesine eklendi.")
-    elif action == "SIL" and len(parts) >= 2:
-        ticker = parts[1].strip().upper()
-        watchlist = load_watchlist()
-        if ticker not in watchlist:
-            send_telegram_message(token, chat_id, f"{ticker} izleme listesinde değil.")
-            return
-        watchlist.remove(ticker)
-        save_watchlist(watchlist)
-        send_telegram_message(token, chat_id, f"{ticker} izleme listesinden silindi.")
-    else:
-        send_telegram_message(
-            token, chat_id,
-            "Kullanım:\n/izle - listeyi göster\n/izle EKLE HISSE\n/izle SIL HISSE",
-        )
-
-
 def format_liste(ranked, top_n=10):
     shown = [item for item in ranked if item[1] > 0][:top_n]
     n_tf = len(TIMEFRAME_LABELS_ORDERED)
@@ -261,7 +210,7 @@ def format_liste(ranked, top_n=10):
 
 
 def handle_liste(token, chat_id):
-    universe = get_scan_universe()
+    universe = BIST30_TICKERS
     send_telegram_message(
         token, chat_id,
         f"{len(universe)} hisse, 6 zaman diliminde taranıyor, bu birkaç dakika sürebilir...",
@@ -321,14 +270,6 @@ def main():
                 print(f"Komut alindi: /coklu {arg}")
                 try:
                     handle_coklu(token, chat_id, arg)
-                except Exception as e:
-                    print(f"Komut isleme hatasi: {e}")
-                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
-            elif text == "/izle" or text.startswith("/izle "):
-                arg = text[len("/izle"):].strip()
-                print(f"Komut alindi: /izle {arg}")
-                try:
-                    handle_izle(token, chat_id, arg)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")

@@ -3,11 +3,10 @@
 """
 BIST 30 SUPERTREND AL SİNYALİ ALARMI
 =====================================
-BIST 30 (XU030) + kullanıcının izleme listesindeki hisseleri tarar, 1
-saatlik mum verisinden Supertrend göstergesini (ATR periyodu 10, çarpan
-3 - TradingView varsayılanı) hesaplar. Trend, en son KAPANMIŞ mumda
-düşüşten yükselişe döndüyse ("AL" sinyali), bunu Telegram üzerinden
-bildirir.
+BIST 30 (XU030) hisselerini tarar, 1 saatlik mum verisinden Supertrend
+göstergesini (ATR periyodu 10, çarpan 3 - TradingView varsayılanı) hesaplar.
+Trend, en son KAPANMIŞ mumda düşüşten yükselişe döndüyse ("AL" sinyali),
+bunu Telegram üzerinden bildirir.
 
 Bağımsız çalışır, hiçbir yerel dosyaya bağımlı değildir. Gün içinde
 (BIST işlem saatleri: 10:00-18:00, hafta içi) periyodik olarak - örn.
@@ -43,7 +42,6 @@ from zoneinfo import ZoneInfo
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "supertrend_alarm_state.json"
 TELEGRAM_CONFIG_FILE = BASE_DIR / "telegram_config.json"
-WATCHLIST_FILE = BASE_DIR / "watchlist.json"
 ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
 
 # BIST 30 (XU030) bileşenleri - infoyatirim.com ve getmidas.com üzerinden
@@ -287,25 +285,6 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
 
-def load_watchlist():
-    if WATCHLIST_FILE.exists():
-        try:
-            return sorted(set(json.loads(WATCHLIST_FILE.read_text())))
-        except Exception:
-            return []
-    return []
-
-
-def save_watchlist(tickers):
-    WATCHLIST_FILE.write_text(json.dumps(sorted(set(tickers)), ensure_ascii=False, indent=2))
-
-
-def get_scan_universe():
-    """AL sinyali taramasında ve genel /durum sorgusunda kullanılacak
-    hisse listesi: BIST 30 + kullanıcının izleme listesi."""
-    return sorted(set(BIST30_TICKERS) | set(load_watchlist()))
-
-
 def load_telegram_config():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -370,7 +349,7 @@ def main():
               "(ortam degiskeni ya da telegram_config.json). Sinyaller sadece "
               "konsola yazilacak, Telegram'a gonderilmeyecek.\n")
 
-    universe = get_scan_universe()
+    universe = BIST30_TICKERS
     interval, range_ = TIMEFRAME_CONFIG["1s"]
     new_signals = []
     for i, ticker in enumerate(universe, 1):
