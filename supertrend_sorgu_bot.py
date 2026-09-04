@@ -18,6 +18,7 @@ KOMUTLAR (Telegram'dan bota yaz)
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
+    /start          -> tanıtım/giriş mesajını gösterir
     /help           -> komut listesini gösterir
 
 Güvenlik: sadece telegram_config.json'daki chat_id'den gelen komutlara
@@ -51,6 +52,13 @@ TIMEFRAME_NAMES = {
     "5dk": "5 Dakika", "15dk": "15 Dakika", "1s": "1 Saat",
     "4s": "4 Saat", "1g": "1 Gün", "1hf": "1 Hafta",
 }
+
+WELCOME_TEXT = (
+    "<b>🤖 Supertrend Sorgu Botu</b>\n\n"
+    "Bu bot ALPER GÜL tarafından yaratılmıştır, hisse taraması amacıyla "
+    "kullanılmakta olup yatırım tavsiyesi içermez. Tüm hakları saklıdır.\n\n"
+    "Komutlar için /help yaz."
+)
 
 HELP_TEXT = (
     "<b>🤖 Supertrend Sorgu Botu - Komutlar</b>\n\n"
@@ -245,6 +253,9 @@ def main():
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
+            elif text == "/start":
+                print("Komut alindi: /start")
+                send_telegram_message(token, chat_id, WELCOME_TEXT)
             elif text == "/help":
                 print("Komut alindi: /help")
                 send_telegram_message(token, chat_id, HELP_TEXT)
