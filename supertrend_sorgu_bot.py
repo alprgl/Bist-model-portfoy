@@ -116,12 +116,12 @@ def format_all(results):
     lines = ["<b>📊 BIST 30 - Anlık Supertrend Durumu (1S)</b>", now_str, ""]
     lines.append(f"🟢 Yükseliş trendinde ({len(up)}):")
     for r in up:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f} üzerinde)")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f})")
     lines.append("")
     lines.append(f"🔴 Düşüş trendinde ({len(down)}, AL'a en yakın üstte):")
     for r in down:
         # Telegram HTML parse_mode "<" karakterini etiket sanip mesaji reddeder, &lt; olarak kacir.
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f} altında)")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f})")
     return "\n".join(lines)
 
 
@@ -139,7 +139,7 @@ def format_multi(ticker, results):
             lines.append(f"{name}: veri yok")
             continue
         yon_emoji = "🟢" if s["yon"] == 1 else "🔴"
-        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (fiyata %{s['mesafe_pct']:.1f})")
+        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f})")
     return "\n".join(lines)
 
 
