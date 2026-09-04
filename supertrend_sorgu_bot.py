@@ -19,6 +19,8 @@ KOMUTLAR (Telegram'dan bota yaz)
     /izle           -> izleme listesini göster
     /izle EKLE X    -> X hissesini izleme listesine ekle (BIST'te işlem gören her hisse)
     /izle SIL X     -> X hissesini izleme listesinden çıkar
+    /liste          -> BIST 30 + izleme listesini tüm zaman dilimlerinde tarar,
+                        en çok AL sinyali veren hisseleri sıralar (kendi seçer)
     /yardim         -> komut listesini gösterir
 
 Güvenlik: sadece telegram_config.json'daki chat_id'den gelen komutlara
@@ -41,8 +43,10 @@ from supertrend_alarm import (
     TIMEFRAME_CONFIG,
     TIMEFRAME_LABELS_ORDERED,
     compute_supertrend,
+    count_buy_signals,
     get_closed_candles,
     get_scan_universe,
+    get_timeframe_candles,
     get_timeframe_status,
     load_telegram_config,
     load_watchlist,
@@ -69,6 +73,8 @@ HELP_TEXT = (
     "BIST'te işlem gören herhangi bir hisseyi izleme listesine ekler (bu hisse hem /durum taramasına hem periyodik AL sinyali alarmına dahil olur).\n\n"
     "<b>/izle SIL HISSE</b>\n"
     "Hisseyi izleme listesinden çıkarır.\n\n"
+    "<b>/liste</b>\n"
+    "BIST 30 + izleme listesindeki hisseleri 6 zaman diliminin tamamında tarar ve taranan aralıkta en çok Supertrend AL sinyali üretenleri kendi sıralayıp gösterir (birkaç dakika sürebilir).\n\n"
     "<b>/yardim</b>\n"
     "Bu mesajı gösterir."
 )
@@ -238,6 +244,39 @@ def handle_izle(token, chat_id, arg):
         )
 
 
+def format_liste(ranked, top_n=10):
+    shown = [item for item in ranked if item[1] > 0][:top_n]
+    lines = [
+        "<b>🏆 En Çok Supertrend AL Sinyali Veren Hisseler</b>",
+        "(5dk+15dk+1s+4s+1g+1hf toplam sinyal sayısı)",
+        "",
+    ]
+    if not shown:
+        lines.append("Taranan aralıkta AL sinyali bulunamadı.")
+    else:
+        for i, (ticker, count) in enumerate(shown, 1):
+            lines.append(f"{i}. {ticker} — {count} sinyal")
+    return "\n".join(lines)
+
+
+def handle_liste(token, chat_id):
+    universe = get_scan_universe()
+    send_telegram_message(
+        token, chat_id,
+        f"{len(universe)} hisse, 6 zaman diliminde taranıyor, bu birkaç dakika sürebilir...",
+    )
+    totals = {}
+    for ticker in universe:
+        total = 0
+        for label in TIMEFRAME_LABELS_ORDERED:
+            candles = get_timeframe_candles(ticker, label)
+            total += count_buy_signals(compute_supertrend(candles))
+            time.sleep(REQUEST_DELAY_SEC)
+        totals[ticker] = total
+    ranked = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+    send_telegram_message(token, chat_id, format_liste(ranked))
+
+
 def main():
     token, chat_id = load_telegram_config()
     if not token or not chat_id:
@@ -288,6 +327,13 @@ def main():
                 print(f"Komut alindi: /izle {arg}")
                 try:
                     handle_izle(token, chat_id, arg)
+                except Exception as e:
+                    print(f"Komut isleme hatasi: {e}")
+                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
+            elif text == "/liste":
+                print("Komut alindi: /liste")
+                try:
+                    handle_liste(token, chat_id)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
