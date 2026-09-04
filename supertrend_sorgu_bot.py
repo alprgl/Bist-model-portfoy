@@ -14,8 +14,7 @@ KeepAlive ile arka planda hep açık tutulur).
 KOMUTLAR (Telegram'dan bota yaz)
 ---------------------------------
     /durum          -> BIST 30'daki tüm hisselerin anlık (1S) trend yönü
-    /durum THYAO    -> tek bir hissenin anlık (1S) detayı
-    /coklu THYAO    -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
+    /durum THYAO    -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
@@ -58,8 +57,6 @@ HELP_TEXT = (
     "<b>/durum</b>\n"
     "BIST 30'daki tüm hisselerin anlık (1 saatlik) trend yönünü listeler.\n\n"
     "<b>/durum HISSE</b>  (örn. /durum THYAO)\n"
-    "Tek bir hissenin anlık (1 saatlik) Supertrend detayını gösterir.\n\n"
-    "<b>/coklu HISSE</b>  (örn. /coklu THYAO)\n"
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
@@ -111,18 +108,6 @@ def current_status(ticker):
     }
 
 
-def format_single(s):
-    yon_str = "🟢 YUKARI (AL bölgesi)" if s["yon"] == 1 else "🔴 AŞAĞI (SAT bölgesi)"
-    return (
-        f"<b>{s['ticker']}</b>\n"
-        f"Yön: {yon_str}\n"
-        f"Kapanış: {s['kapanis']:.2f}\n"
-        f"Supertrend: {s['supertrend']:.2f}\n"
-        f"Çizgiye mesafe: %{s['mesafe_pct']:.2f}\n"
-        f"Son mum: {s['mum_zamani'].strftime('%Y-%m-%d %H:%M')}"
-    )
-
-
 def format_all(results):
     up = sorted([r for r in results if r["yon"] == 1], key=lambda r: r["mesafe_pct"])
     down = sorted([r for r in results if r["yon"] == -1], key=lambda r: abs(r["mesafe_pct"]))
@@ -140,29 +125,10 @@ def format_all(results):
     return "\n".join(lines)
 
 
-def handle_durum(token, chat_id, arg):
-    if arg:
-        ticker = arg.strip().upper()
-        s = current_status(ticker)
-        if not s:
-            send_telegram_message(token, chat_id, f"'{ticker}' için veri alınamadı, hisse kodunu kontrol et.")
-            return
-        send_telegram_message(token, chat_id, format_single(s))
-    else:
-        send_telegram_message(token, chat_id, "Taranıyor, birkaç saniye sürecek...")
-        results = []
-        for t in BIST30_TICKERS:
-            s = current_status(t)
-            time.sleep(REQUEST_DELAY_SEC)
-            if s:
-                results.append(s)
-        send_telegram_message(token, chat_id, format_all(results))
-
-
 def format_multi(ticker, results):
     guncel_fiyat = next((s["kapanis"] for label in TIMEFRAME_LABELS_ORDERED
                           if (s := results.get(label))), None)
-    lines = [f"<b>⏱ {ticker} - Çoklu Zaman Dilimi Supertrend</b>"]
+    lines = [f"<b>⏱ {ticker} - Supertrend Durumu</b>"]
     if guncel_fiyat is not None:
         lines.append(f"Güncel fiyat: {guncel_fiyat:.2f}")
     lines.append("")
@@ -177,20 +143,27 @@ def format_multi(ticker, results):
     return "\n".join(lines)
 
 
-def handle_coklu(token, chat_id, arg):
-    if not arg:
-        send_telegram_message(token, chat_id, "Kullanım: /coklu HISSE (örn. /coklu THYAO)")
-        return
-    ticker = arg.strip().upper()
-    send_telegram_message(token, chat_id, f"{ticker} taranıyor...")
-    results = {}
-    for label in TIMEFRAME_LABELS_ORDERED:
-        results[label] = get_timeframe_status(ticker, label)
-        time.sleep(REQUEST_DELAY_SEC)
-    if all(v is None for v in results.values()):
-        send_telegram_message(token, chat_id, f"'{ticker}' için veri alınamadı, hisse kodunu kontrol et.")
-        return
-    send_telegram_message(token, chat_id, format_multi(ticker, results))
+def handle_durum(token, chat_id, arg):
+    if arg:
+        ticker = arg.strip().upper()
+        send_telegram_message(token, chat_id, f"{ticker} taranıyor...")
+        results = {}
+        for label in TIMEFRAME_LABELS_ORDERED:
+            results[label] = get_timeframe_status(ticker, label)
+            time.sleep(REQUEST_DELAY_SEC)
+        if all(v is None for v in results.values()):
+            send_telegram_message(token, chat_id, f"'{ticker}' için veri alınamadı, hisse kodunu kontrol et.")
+            return
+        send_telegram_message(token, chat_id, format_multi(ticker, results))
+    else:
+        send_telegram_message(token, chat_id, "Taranıyor, birkaç saniye sürecek...")
+        results = []
+        for t in BIST30_TICKERS:
+            s = current_status(t)
+            time.sleep(REQUEST_DELAY_SEC)
+            if s:
+                results.append(s)
+        send_telegram_message(token, chat_id, format_all(results))
 
 
 def format_liste(ranked, top_n=10):
@@ -262,14 +235,6 @@ def main():
                 print(f"Komut alindi: /durum {arg}")
                 try:
                     handle_durum(token, chat_id, arg)
-                except Exception as e:
-                    print(f"Komut isleme hatasi: {e}")
-                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
-            elif text == "/coklu" or text.startswith("/coklu "):
-                arg = text[len("/coklu"):].strip()
-                print(f"Komut alindi: /coklu {arg}")
-                try:
-                    handle_coklu(token, chat_id, arg)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
