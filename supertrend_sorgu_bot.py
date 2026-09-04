@@ -19,6 +19,7 @@ KOMUTLAR (Telegram'dan bota yaz)
     /izle           -> izleme listesini göster
     /izle EKLE X    -> X hissesini izleme listesine ekle (BIST'te işlem gören her hisse)
     /izle SIL X     -> X hissesini izleme listesinden çıkar
+    /yardim         -> komut listesini gösterir
 
 Güvenlik: sadece telegram_config.json'daki chat_id'den gelen komutlara
 cevap verir, başka biri botu bulup yazsa bile yanıt almaz.
@@ -53,6 +54,24 @@ TIMEFRAME_NAMES = {
     "5dk": "5 Dakika", "15dk": "15 Dakika", "1s": "1 Saat",
     "4s": "4 Saat", "1g": "1 Gün", "1hf": "1 Hafta",
 }
+
+HELP_TEXT = (
+    "<b>🤖 Supertrend Sorgu Botu - Komutlar</b>\n\n"
+    "<b>/durum</b>\n"
+    "BIST 30 + izleme listesindeki tüm hisselerin anlık (1 saatlik) trend yönünü listeler.\n\n"
+    "<b>/durum HISSE</b>  (örn. /durum THYAO)\n"
+    "Tek bir hissenin anlık (1 saatlik) Supertrend detayını gösterir.\n\n"
+    "<b>/coklu HISSE</b>  (örn. /coklu THYAO)\n"
+    "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
+    "<b>/izle</b>\n"
+    "İzleme listesindeki hisseleri gösterir.\n\n"
+    "<b>/izle EKLE HISSE</b>\n"
+    "BIST'te işlem gören herhangi bir hisseyi izleme listesine ekler (bu hisse hem /durum taramasına hem periyodik AL sinyali alarmına dahil olur).\n\n"
+    "<b>/izle SIL HISSE</b>\n"
+    "Hisseyi izleme listesinden çıkarır.\n\n"
+    "<b>/yardim</b>\n"
+    "Bu mesajı gösterir."
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 OFFSET_FILE = BASE_DIR / "supertrend_sorgu_offset.json"
@@ -272,6 +291,12 @@ def main():
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
+            elif text in ("/yardim", "/help", "/start"):
+                print("Komut alindi: /yardim")
+                send_telegram_message(token, chat_id, HELP_TEXT)
+            elif text.startswith("/"):
+                print(f"Bilinmeyen komut: {text}")
+                send_telegram_message(token, chat_id, "Bilinmeyen komut. Komutları görmek için /yardim yaz.")
 
 
 if __name__ == "__main__":
