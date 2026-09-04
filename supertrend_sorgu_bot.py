@@ -146,7 +146,12 @@ def handle_durum(token, chat_id, arg):
 
 
 def format_multi(ticker, results):
-    lines = [f"<b>⏱ {ticker} - Çoklu Zaman Dilimi Supertrend</b>", ""]
+    guncel_fiyat = next((s["kapanis"] for label in TIMEFRAME_LABELS_ORDERED
+                          if (s := results.get(label))), None)
+    lines = [f"<b>⏱ {ticker} - Çoklu Zaman Dilimi Supertrend</b>"]
+    if guncel_fiyat is not None:
+        lines.append(f"Güncel fiyat: {guncel_fiyat:.2f}")
+    lines.append("")
     for label in TIMEFRAME_LABELS_ORDERED:
         s = results.get(label)
         name = TIMEFRAME_NAMES[label]
@@ -154,7 +159,7 @@ def format_multi(ticker, results):
             lines.append(f"{name}: veri yok")
             continue
         yon_emoji = "🟢" if s["yon"] == 1 else "🔴"
-        lines.append(f"{yon_emoji} {name}: {s['kapanis']:.2f} (çizgiye %{s['mesafe_pct']:.1f})")
+        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (fiyata %{s['mesafe_pct']:.1f})")
     return "\n".join(lines)
 
 
