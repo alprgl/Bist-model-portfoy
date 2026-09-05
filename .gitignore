@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 telegram_config.json
+anthropic_config.json
 supertrend_alarm_state.json
 supertrend_alarm.log
 supertrend_sorgu_offset.json

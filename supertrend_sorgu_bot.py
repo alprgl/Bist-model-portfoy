@@ -37,7 +37,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from haber_alarm import fetch_rss_items, format_message as format_haber_message
+from haber_alarm import analyze_impact, fetch_rss_items, format_message as format_haber_message
 from supertrend_alarm import (
     BIST30_TICKERS,
     REQUEST_DELAY_SEC,
@@ -71,7 +71,8 @@ HELP_TEXT = (
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
     "<b>/haber</b>\n"
-    f"Son {HABER_LIMIT} ekonomi haberini tek tek, ayrı mesajlar halinde gönderir (liste olarak değil).\n\n"
+    f"Son {HABER_LIMIT} ekonomi haberini tek tek, ayrı mesajlar halinde gönderir (liste olarak değil). "
+    "Her haberin altına BIST için olumlu/olumsuz yönü, 10 üzerinden şiddeti ve kısa gerekçesi eklenir.\n\n"
     "<b>/help</b>\n"
     "Bu mesajı gösterir."
 )
@@ -202,7 +203,8 @@ def handle_haber(token, chat_id):
         return
     # RSS'te en yeni en üstte gelir; eskiden yeniye gönder, en yeni sohbette en altta olsun.
     for it in reversed(items[:HABER_LIMIT]):
-        send_telegram_message(token, chat_id, format_haber_message(it))
+        analysis = analyze_impact(it)
+        send_telegram_message(token, chat_id, format_haber_message(it, analysis))
         time.sleep(HABER_SEND_DELAY_SEC)
 
 

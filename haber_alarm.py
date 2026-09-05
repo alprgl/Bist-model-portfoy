@@ -31,12 +31,16 @@ from supertrend_alarm import ISTANBUL_TZ, load_telegram_config, send_telegram_me
 
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "haber_alarm_state.json"
+ANTHROPIC_CONFIG_FILE = BASE_DIR / "anthropic_config.json"
 RSS_URL = "https://www.foreks.com/rss/"
 CONTENT_NS = {"content": "http://purl.org/rss/1.0/modules/content/"}
 CHECK_INTERVAL_SEC = 600  # 10 dakika
 REQUEST_TIMEOUT_SEC = 20
 SEND_DELAY_SEC = 0.5  # ayrı mesajlar arasında Telegram'ı yormamak icin
 MAX_SEEN = 500
+ANALYSIS_MODEL = "claude-opus-5"
+
+YON_EMOJI = {"Olumlu": "🟢", "Olumsuz": "🔴", "Notr": "⚪"}
 
 
 def extract_content(encoded_html):
@@ -77,13 +81,72 @@ def save_seen(seen):
     STATE_FILE.write_text(json.dumps(seen[-MAX_SEEN:], ensure_ascii=False, indent=2))
 
 
-def format_message(item):
+def load_anthropic_key():
+    if ANTHROPIC_CONFIG_FILE.exists():
+        try:
+            return json.loads(ANTHROPIC_CONFIG_FILE.read_text()).get("api_key")
+        except Exception:
+            return None
+    return None
+
+
+def parse_analysis(text):
+    yon_m = re.search(r"YON:\s*(Olumlu|Olumsuz|Notr)", text, re.IGNORECASE)
+    puan_m = re.search(r"PUAN:\s*(\d+)", text)
+    gerekce_m = re.search(r"GEREKCE:\s*(.+)", text, re.IGNORECASE)
+    if not yon_m or not puan_m:
+        return None
+    yon = yon_m.group(1).capitalize()
+    puan = max(1, min(10, int(puan_m.group(1))))
+    gerekce = gerekce_m.group(1).strip() if gerekce_m else ""
+    return {"yon": yon, "puan": puan, "gerekce": gerekce}
+
+
+def analyze_impact(item):
+    """Haberin Borsa Istanbul icin olumlu/olumsuz oldugunu ve siddetini
+    (1-10) Claude'a degerlendirtir. API anahtari yoksa ya da cagri
+    basarisiz olursa None doner - haber yine de analizsiz gosterilir."""
+    api_key = load_anthropic_key()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            "Aşağıdaki ekonomi/piyasa haberini oku ve Borsa İstanbul (BIST) "
+            "genel endeksi açısından değerlendir.\n\n"
+            f"Başlık: {item['title']}\n"
+            f"İçerik: {item['icerik']}\n\n"
+            "Tam olarak şu formatta, başka hiçbir şey eklemeden cevap ver:\n"
+            "YON: Olumlu / Olumsuz / Notr\n"
+            "PUAN: 1-10 arası bir sayı (şiddeti - 1 çok hafif, 10 çok şiddetli/önemli)\n"
+            "GEREKCE: tek cümlelik kısa açıklama"
+        )
+        response = client.messages.create(
+            model=ANALYSIS_MODEL,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        return parse_analysis(text)
+    except Exception as e:
+        print(f"Claude analiz hatası: {e}")
+        return None
+
+
+def format_message(item, analysis=None):
     title = html.escape(item["title"])
     link = html.escape(item["link"], quote=True)
     lines = [f'<b>📰 <a href="{link}">{title}</a></b>']
     if item["icerik"]:
         lines.append("")
         lines.append(html.escape(item["icerik"]))
+    if analysis:
+        emoji = YON_EMOJI.get(analysis["yon"], "⚪")
+        lines.append("")
+        lines.append(f"{emoji} <b>{analysis['yon']}</b> — Şiddet: {analysis['puan']}/10")
+        if analysis["gerekce"]:
+            lines.append(html.escape(analysis["gerekce"]))
     return "\n".join(lines)
 
 
