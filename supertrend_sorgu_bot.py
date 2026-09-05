@@ -18,6 +18,8 @@ KOMUTLAR (Telegram'dan bota yaz)
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
+    /haber          -> son ekonomi haberlerini tek tek, ayrı mesajlar
+                        halinde gönderir (liste değil)
     /start          -> tanıtım/giriş mesajını gösterir
     /help           -> komut listesini gösterir
 
@@ -35,6 +37,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from haber_alarm import fetch_rss_items, format_message as format_haber_message
 from supertrend_alarm import (
     BIST30_TICKERS,
     REQUEST_DELAY_SEC,
@@ -43,6 +46,9 @@ from supertrend_alarm import (
     load_telegram_config,
     send_telegram_message,
 )
+
+HABER_LIMIT = 10
+HABER_SEND_DELAY_SEC = 0.5
 
 TIMEFRAME_NAMES = {
     "5dk": "5 Dakika", "15dk": "15 Dakika", "1s": "1 Saat",
@@ -64,6 +70,8 @@ HELP_TEXT = (
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
+    "<b>/haber</b>\n"
+    f"Son {HABER_LIMIT} ekonomi haberini tek tek, ayrı mesajlar halinde gönderir (liste olarak değil).\n\n"
     "<b>/help</b>\n"
     "Bu mesajı gösterir."
 )
@@ -183,6 +191,21 @@ def handle_liste(token, chat_id):
     send_telegram_message(token, chat_id, format_liste(ranked))
 
 
+def handle_haber(token, chat_id):
+    try:
+        items = fetch_rss_items()
+    except Exception as e:
+        send_telegram_message(token, chat_id, f"Haberler alınamadı: {e}")
+        return
+    if not items:
+        send_telegram_message(token, chat_id, "Şu an gösterilecek haber yok.")
+        return
+    # RSS'te en yeni en üstte gelir; eskiden yeniye gönder, en yeni sohbette en altta olsun.
+    for it in reversed(items[:HABER_LIMIT]):
+        send_telegram_message(token, chat_id, format_haber_message(it))
+        time.sleep(HABER_SEND_DELAY_SEC)
+
+
 def main():
     token, chat_id = load_telegram_config()
     if not token or not chat_id:
@@ -224,6 +247,13 @@ def main():
                 print("Komut alindi: /liste")
                 try:
                     handle_liste(token, chat_id)
+                except Exception as e:
+                    print(f"Komut isleme hatasi: {e}")
+                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
+            elif text == "/haber":
+                print("Komut alindi: /haber")
+                try:
+                    handle_haber(token, chat_id)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
