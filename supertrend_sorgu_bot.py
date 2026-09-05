@@ -111,7 +111,7 @@ def format_all(results):
         # Telegram HTML parse_mode "<" karakterini etiket sanip mesaji reddeder, &lt; olarak kacir.
         lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f}){hacim}")
     lines.append("")
-    lines.append("🔥 = son mumda ortalamanın 2 katından fazla hacimle yükseliş (yüksek para girişi)")
+    lines.append("🔥 = yanındaki hissenin 1 saatlik hacmi, önceki 20 mumun ortalamasının 2 katından fazla ve fiyat yükselişte (yüksek para girişi)")
     return "\n".join(lines)
 
 
@@ -132,7 +132,7 @@ def format_multi(ticker, results):
         hacim = " 🔥" if s["yuksek_hacim"] else ""
         lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f}){hacim}")
     lines.append("")
-    lines.append("🔥 = o zaman diliminde ortalamanın 2 katından fazla hacimle yükseliş")
+    lines.append("🔥 = yanındaki zaman diliminde hacim, önceki 20 mumun ortalamasının 2 katından fazla ve fiyat yükselişte")
     return "\n".join(lines)
 
 
