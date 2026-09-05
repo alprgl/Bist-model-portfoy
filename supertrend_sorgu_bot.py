@@ -112,7 +112,7 @@ def format_all(results):
         rsi = f" RSI {r['rsi']:.0f}" if r["rsi"] is not None else ""
         hacim = " 🔥" if r["yuksek_hacim"] else ""
         tik = " ✅" if (r["rsi_uygun"] and r["yuksek_hacim"]) else ""
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f}){rsi}{hacim}{tik}")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (%{r['mesafe_pct']:.1f}){rsi}{hacim}{tik}")
     return "\n".join(lines)
 
 
