@@ -51,8 +51,8 @@ HABER_LIMIT = 10
 HABER_SEND_DELAY_SEC = 0.5
 
 TIMEFRAME_NAMES = {
-    "5dk": "5 Dakika", "15dk": "15 Dakika", "1s": "1 Saat",
-    "4s": "4 Saat", "1g": "1 Gün", "1hf": "1 Hafta",
+    "5dk": "5m", "15dk": "15m", "1s": "1h",
+    "4s": "4h", "1g": "1d", "1hf": "1w",
 }
 
 WELCOME_TEXT = (
