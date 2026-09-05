@@ -20,6 +20,8 @@ KOMUTLAR (Telegram'dan bota yaz)
                         (0-6 arası puan, kendi seçer)
     /firsat         -> 1g'de sert düşmüş ama 1s'de AL'a dönmüş ve hacim
                         girişi olan (fırsat) hisseleri tarar
+    /gunici         -> 5dk+15dk+1s hepsi AL, hacim girişi ve RSI teyidi
+                        olan gün içi trade adaylarını tarar
     /haber          -> son ekonomi haberlerini tek tek, ayrı mesajlar
                         halinde gönderir (liste değil)
     /start          -> tanıtım/giriş mesajını gösterir
@@ -74,6 +76,8 @@ HELP_TEXT = (
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
     "<b>/firsat</b>\n"
     "BIST 30'u tarar; 1 günlükte çizginin en az %5 altında (sert düşmüş) ama 1 saatlikte AL'a dönmüş ve kısa vadede (5dk/15dk/1s) hacim girişi olan hisseleri listeler (birkaç dakika sürebilir).\n\n"
+    "<b>/gunici</b>\n"
+    "BIST 30'u tarar; 5dk+15dk+1s'in ÜÇÜ BİRDEN AL'da olan, en az birinde hacim girişi ve en az birinde RSI teyidi olan gün içi trade adaylarını listeler (geçmiş trende bakmaz, sadece anlık gücü ölçer, birkaç dakika sürebilir).\n\n"
     "<b>/haber</b>\n"
     f"Son {HABER_LIMIT} ekonomi haberini tek tek, ayrı mesajlar halinde gönderir (liste olarak değil). "
     "Her haberin altına BIST için olumlu/olumsuz yönü, 10 üzerinden şiddeti ve kısa gerekçesi eklenir.\n\n"
@@ -256,6 +260,58 @@ def handle_firsat(token, chat_id):
     send_telegram_message(token, chat_id, format_firsatlar(firsatlar))
 
 
+GUNICI_TIMEFRAMES = ("5dk", "15dk", "1s")
+
+
+def find_gunici_firsatlari(universe):
+    """Kısa vadede (5dk+15dk+1s) tam hizalanmış (hepsi AL), hacim girişi
+    olan ve RSI teyidi olan gün içi trade adaylarını bulur. Döner:
+    (ticker, durumlar) listesi, en güçlü 1s momentumundan en zayıfa."""
+    adaylar = []
+    for ticker in universe:
+        durumlar = {}
+        for label in GUNICI_TIMEFRAMES:
+            durumlar[label] = get_timeframe_status(ticker, label)
+            time.sleep(REQUEST_DELAY_SEC)
+        if not all(durumlar.values()):
+            continue
+        hepsi_al = all(durumlar[tf]["yon"] == 1 for tf in GUNICI_TIMEFRAMES)
+        hacim_var = any(durumlar[tf]["yuksek_hacim"] for tf in GUNICI_TIMEFRAMES)
+        rsi_teyit = any(durumlar[tf]["rsi_uygun"] for tf in GUNICI_TIMEFRAMES)
+        if hepsi_al and hacim_var and rsi_teyit:
+            adaylar.append((ticker, durumlar))
+
+    adaylar.sort(key=lambda x: x[1]["1s"]["mesafe_pct"], reverse=True)
+    return adaylar
+
+
+def format_gunici(adaylar):
+    lines = [
+        "<b>⚡ Gün İçi Fırsatları</b>",
+        "(5dk+15dk+1s hepsi AL, hacim girişi + RSI teyidi var)",
+        "",
+    ]
+    if not adaylar:
+        lines.append("Şu an kriterlere uyan hisse yok.")
+    else:
+        for ticker, d in adaylar:
+            lines.append(
+                f"• <b>{ticker}</b> — 5dk: %{d['5dk']['mesafe_pct']:.1f} | "
+                f"15dk: %{d['15dk']['mesafe_pct']:.1f} | 1s: %{d['1s']['mesafe_pct']:.1f} 🔥"
+            )
+    return "\n".join(lines)
+
+
+def handle_gunici(token, chat_id):
+    universe = BIST30_TICKERS
+    send_telegram_message(
+        token, chat_id,
+        f"{len(universe)} hisse taranıyor, bu birkaç dakika sürebilir...",
+    )
+    adaylar = find_gunici_firsatlari(universe)
+    send_telegram_message(token, chat_id, format_gunici(adaylar))
+
+
 def handle_haber(token, chat_id):
     try:
         items = fetch_rss_items()
@@ -320,6 +376,13 @@ def main():
                 print("Komut alindi: /firsat")
                 try:
                     handle_firsat(token, chat_id)
+                except Exception as e:
+                    print(f"Komut isleme hatasi: {e}")
+                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
+            elif text == "/gunici":
+                print("Komut alindi: /gunici")
+                try:
+                    handle_gunici(token, chat_id)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
