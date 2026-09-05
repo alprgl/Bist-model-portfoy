@@ -128,7 +128,7 @@ def format_multi(ticker, results):
             lines.append(f"{name}: veri yok")
             continue
         yon_emoji = "🟢" if s["yon"] == 1 else "🔴"
-        hacim = " 🔥 Yüksek hacim" if s["yuksek_hacim"] else ""
+        hacim = " 🔥" if s["yuksek_hacim"] else ""
         rsi = f" RSI {s['rsi']:.0f}{' ✅' if s['rsi_uygun'] else ''}" if s["rsi"] is not None else ""
         lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f}){rsi}{hacim}")
     return "\n".join(lines)
