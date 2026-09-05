@@ -102,16 +102,14 @@ def format_all(results):
     lines = ["<b>📊 BIST 30 - Anlık Supertrend Durumu (1S)</b>", now_str, ""]
     lines.append(f"🟢 Yükseliş trendinde ({len(up)}):")
     for r in up:
-        hacim = " 🔥" if r["yuksek_hacim"] else ""
+        hacim = " 🔥 Yüksek hacim" if r["yuksek_hacim"] else ""
         lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f}){hacim}")
     lines.append("")
     lines.append(f"🔴 Düşüş trendinde ({len(down)}, AL'a en yakın üstte):")
     for r in down:
-        hacim = " 🔥" if r["yuksek_hacim"] else ""
+        hacim = " 🔥 Yüksek hacim" if r["yuksek_hacim"] else ""
         # Telegram HTML parse_mode "<" karakterini etiket sanip mesaji reddeder, &lt; olarak kacir.
         lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f}){hacim}")
-    lines.append("")
-    lines.append("🔥 = yanındaki hissenin 1 saatlik hacmi, önceki 20 mumun ortalamasının 2 katından fazla ve fiyat yükselişte (yüksek para girişi)")
     return "\n".join(lines)
 
 
@@ -129,10 +127,8 @@ def format_multi(ticker, results):
             lines.append(f"{name}: veri yok")
             continue
         yon_emoji = "🟢" if s["yon"] == 1 else "🔴"
-        hacim = " 🔥" if s["yuksek_hacim"] else ""
+        hacim = " 🔥 Yüksek hacim" if s["yuksek_hacim"] else ""
         lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f}){hacim}")
-    lines.append("")
-    lines.append("🔥 = yanındaki zaman diliminde hacim, önceki 20 mumun ortalamasının 2 katından fazla ve fiyat yükselişte")
     return "\n".join(lines)
 
 
