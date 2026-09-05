@@ -95,7 +95,7 @@ def get_updates(token, offset):
 
 
 def format_all(results):
-    up = sorted([r for r in results if r["yon"] == 1], key=lambda r: r["mesafe_pct"])
+    up = sorted([r for r in results if r["yon"] == 1], key=lambda r: r["mesafe_pct"], reverse=True)
 
     now_str = time.strftime("%Y-%m-%d %H:%M", time.localtime())
     lines = ["<b>📊 BIST 30 - Yükseliş Trendinde Olanlar (1S)</b>", now_str, ""]
