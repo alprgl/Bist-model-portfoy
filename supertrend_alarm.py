@@ -6,7 +6,9 @@ BIST 30 SUPERTREND AL SİNYALİ ALARMI
 BIST 30 (XU030) hisselerini tarar, 1 saatlik mum verisinden Supertrend
 göstergesini (ATR periyodu 10, çarpan 3 - TradingView varsayılanı) hesaplar.
 Trend, en son KAPANMIŞ mumda düşüşten yükselişe döndüyse ("AL" sinyali),
-bunu Telegram üzerinden bildirir.
+RSI (14) 50-70 aralığında momentumu teyit ediyorsa bunu Telegram üzerinden
+bildirir. RSI aşırı alım (>70) ya da yetersiz momentum (<50) gösteriyorsa
+sinyal yanlış alarm olma ihtimaline karşı atlanır.
 
 Bağımsız çalışır, hiçbir yerel dosyaya bağımlı değildir. Gün içinde
 (BIST işlem saatleri: 10:00-18:00, hafta içi) periyodik olarak - örn.
@@ -56,6 +58,9 @@ BIST30_TICKERS = sorted([
 
 ATR_PERIOD = 10
 ATR_MULTIPLIER = 3.0
+RSI_PERIOD = 14
+RSI_AL_ALT = 50    # AL yonunde RSI bunun ustunde olmali (momentum destekliyor)
+RSI_AL_UST = 70    # ...ama bunun ustundeyse asiri alim, sinyal güvenilmez
 REQUEST_DELAY_SEC = 0.3
 REQUEST_TIMEOUT_SEC = 20
 
@@ -210,6 +215,8 @@ def get_timeframe_status(ticker, label):
     oran = volume_ratio(candles)
     vol_candle = last_traded_candle(candles)
     yuksek_hacim = bool(oran and vol_candle and oran >= 2.0 and vol_candle[4] > vol_candle[1])
+    rsi_series = compute_rsi(candles)
+    rsi_val = rsi_series[-1] if rsi_series else None
     return {
         "ticker": ticker,
         "zaman_dilimi": label,
@@ -220,6 +227,8 @@ def get_timeframe_status(ticker, label):
         "mesafe_pct": (close - st_val) / st_val * 100.0,
         "hacim_orani": oran,
         "yuksek_hacim": yuksek_hacim,
+        "rsi": rsi_val,
+        "rsi_uygun": rsi_confirms(rsi_val, direction),
     }
 
 
@@ -289,6 +298,45 @@ def compute_supertrend(candles, period=ATR_PERIOD, multiplier=ATR_MULTIPLIER):
         (candles[i][0], closes[i], supertrend[i], direction[i])
         for i in range(period - 1, n)
     ]
+
+
+def compute_rsi(candles, period=RSI_PERIOD):
+    """candles: [(dt, o, h, l, c, v), ...] artan zamanlı.
+    Wilder'in RMA yöntemiyle RSI hesaplar (TradingView varsayılanı).
+    Döner: candles ile aynı uzunlukta liste, ısınma dönemi None."""
+    closes = [c[4] for c in candles]
+    n = len(closes)
+    rsi = [None] * n
+    if n < period + 1:
+        return rsi
+
+    gains = [0.0] * n
+    losses = [0.0] * n
+    for i in range(1, n):
+        diff = closes[i] - closes[i - 1]
+        gains[i] = max(diff, 0.0)
+        losses[i] = max(-diff, 0.0)
+
+    avg_gain = sum(gains[1:period + 1]) / period
+    avg_loss = sum(losses[1:period + 1]) / period
+    rsi[period] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    for i in range(period + 1, n):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        rsi[i] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    return rsi
+
+
+def rsi_confirms(rsi_val, direction):
+    """AL yonunde (direction=1) RSI momentumun destekleyip desteklemedigini,
+    asiri alimda olup olmadigini kontrol eder. SAT yonu icin simetriktir."""
+    if rsi_val is None:
+        return False
+    if direction == 1:
+        return RSI_AL_ALT < rsi_val < RSI_AL_UST
+    return (100 - RSI_AL_UST) < rsi_val < (100 - RSI_AL_ALT)
 
 
 def detect_buy_signal(st_series):
@@ -363,7 +411,7 @@ def format_signal_message(signals, run_no):
     now_str = datetime.now(ISTANBUL_TZ).strftime("%Y-%m-%d %H:%M")
     lines = [f"<b>📈 BIST Supertrend AL Sinyali (1S)</b>", f"Tarama #{run_no} — {now_str}", ""]
     for s in signals:
-        lines.append(f"• <b>{s['ticker']}</b> — kapanış {s['kapanis']:.2f} (mum: {s['mum_zamani_str']})")
+        lines.append(f"• <b>{s['ticker']}</b> — kapanış {s['kapanis']:.2f}, RSI {s['rsi']:.0f} (mum: {s['mum_zamani_str']})")
     lines.append("")
     lines.append("Yatırım tavsiyesi değildir.")
     return "\n".join(lines)
@@ -390,11 +438,18 @@ def main():
         signal = detect_buy_signal(st_series)
 
         if signal:
+            rsi_series = compute_rsi(candles)
+            rsi_val = rsi_series[-1] if rsi_series else None
+            if not rsi_confirms(rsi_val, 1):
+                rsi_str = f"{rsi_val:.0f}" if rsi_val is not None else "?"
+                print(f"[{i}/{len(universe)}] {ticker}: AL SINYALI (RSI {rsi_str} teyit etmedi, atlandi)")
+                continue
+            signal["rsi"] = rsi_val
             signal_key = signal["mum_zamani"].isoformat()
             already_sent = state.get(ticker) == signal_key
             status = "AL SINYALI" + (" (zaten bildirildi)" if already_sent else " (YENI)")
             print(f"[{i}/{len(universe)}] {ticker}: {status} - "
-                  f"kapanis {signal['kapanis']:.2f}, supertrend {signal['supertrend']:.2f}")
+                  f"kapanis {signal['kapanis']:.2f}, supertrend {signal['supertrend']:.2f}, RSI {rsi_val:.0f}")
             if not already_sent:
                 signal["ticker"] = ticker
                 signal["mum_zamani_str"] = signal["mum_zamani"].astimezone(ISTANBUL_TZ).strftime("%Y-%m-%d %H:%M")

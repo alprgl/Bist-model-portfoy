@@ -100,7 +100,8 @@ def format_all(results):
     now_str = time.strftime("%Y-%m-%d %H:%M", time.localtime())
     lines = ["<b>📊 BIST 30 - Yükseliş Trendinde Olanlar (1S)</b>", now_str, ""]
     for r in up:
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f})")
+        rsi = f" RSI {r['rsi']:.0f}{' ✅' if r['rsi_uygun'] else ''}" if r["rsi"] is not None else ""
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f}){rsi}")
     return "\n".join(lines)
 
 
@@ -119,7 +120,8 @@ def format_multi(ticker, results):
             continue
         yon_emoji = "🟢" if s["yon"] == 1 else "🔴"
         hacim = " 🔥 Yüksek hacim" if s["yuksek_hacim"] else ""
-        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f}){hacim}")
+        rsi = f" RSI {s['rsi']:.0f}{' ✅' if s['rsi_uygun'] else ''}" if s["rsi"] is not None else ""
+        lines.append(f"{yon_emoji} {name}: ST {s['supertrend']:.2f} (%{s['mesafe_pct']:.1f}){rsi}{hacim}")
     return "\n".join(lines)
 
 
