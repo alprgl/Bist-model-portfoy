@@ -7,3 +7,5 @@ supertrend_alarm_state.json
 supertrend_alarm.log
 supertrend_sorgu_offset.json
 supertrend_sorgu_bot.log
+haber_alarm_state.json
+haber_alarm.log
