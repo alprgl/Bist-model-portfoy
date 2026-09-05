@@ -24,9 +24,10 @@ import re
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 
-from supertrend_alarm import load_telegram_config, send_telegram_message
+from supertrend_alarm import ISTANBUL_TZ, load_telegram_config, send_telegram_message
 
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "haber_alarm_state.json"
@@ -121,7 +122,9 @@ def main():
                 time.sleep(SEND_DELAY_SEC)
             save_seen(seen)
         else:
-            print("Yeni haber yok.")
+            now_str = datetime.now(ISTANBUL_TZ).strftime("%Y-%m-%d %H:%M")
+            print(f"Yeni haber yok. ({now_str})")
+            send_telegram_message(token, chat_id, f"🔍 Tarama: {now_str} — yeni haber yok.")
 
         time.sleep(CHECK_INTERVAL_SEC)
 
