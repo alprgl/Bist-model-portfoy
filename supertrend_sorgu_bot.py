@@ -96,20 +96,11 @@ def get_updates(token, offset):
 
 def format_all(results):
     up = sorted([r for r in results if r["yon"] == 1], key=lambda r: r["mesafe_pct"])
-    down = sorted([r for r in results if r["yon"] == -1], key=lambda r: abs(r["mesafe_pct"]))
 
     now_str = time.strftime("%Y-%m-%d %H:%M", time.localtime())
-    lines = ["<b>📊 BIST 30 - Anlık Supertrend Durumu (1S)</b>", now_str, ""]
-    lines.append(f"🟢 Yükseliş trendinde ({len(up)}):")
+    lines = ["<b>📊 BIST 30 - Yükseliş Trendinde Olanlar (1S)</b>", now_str, ""]
     for r in up:
-        hacim = " 🔥 Yüksek hacim" if r["yuksek_hacim"] else ""
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f}){hacim}")
-    lines.append("")
-    lines.append(f"🔴 Düşüş trendinde ({len(down)}, AL'a en yakın üstte):")
-    for r in down:
-        hacim = " 🔥 Yüksek hacim" if r["yuksek_hacim"] else ""
-        # Telegram HTML parse_mode "<" karakterini etiket sanip mesaji reddeder, &lt; olarak kacir.
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (&lt; %{abs(r['mesafe_pct']):.1f}){hacim}")
+        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (> %{r['mesafe_pct']:.1f})")
     return "\n".join(lines)
 
 
