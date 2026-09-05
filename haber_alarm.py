@@ -3,15 +3,15 @@
 """
 BIST PİYASA HABERLERİ ALARMI
 ==============================
-tr.investing.com'un "Piyasalara Genel Bakış" RSS akışını periyodik olarak
-tarar (BIST'i dolaylı etkileyebilecek faiz, TCMB, kur, küresel piyasa gibi
-genel ekonomi haberleri). Yeni bir başlık bulunca, başlığı ve linkini
-Telegram'a push mesajı olarak gönderir.
+Foreks'in ekonomi RSS akışını periyodik olarak tarar (BIST'i doğrudan ya
+da dolaylı etkileyebilecek şirket, faiz, TCMB, kur, küresel piyasa gibi
+haberler). Yeni bir haber bulunca, başlığını ve kısa içerik özetini
+Telegram'a AYRI birer push mesajı olarak gönderir.
 
 Sürekli çalışan bir süreçtir (launchd KeepAlive ile arka planda hep açık
 tutulur), her CHECK_INTERVAL_SEC saniyede bir RSS akışını kontrol eder.
 İlk çalıştırmada mevcut haberler sessizce "görüldü" olarak işaretlenir,
-sadece bundan SONRA çıkan yeni başlıklar bildirilir.
+sadece bundan SONRA çıkan yeni haberler bildirilir.
 
 KULLANIM
 --------
@@ -20,6 +20,7 @@ KULLANIM
 
 import html
 import json
+import re
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -29,15 +30,24 @@ from supertrend_alarm import load_telegram_config, send_telegram_message
 
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "haber_alarm_state.json"
-RSS_URL = "https://tr.investing.com/rss/market_overview.rss"
+RSS_URL = "https://www.foreks.com/rss/"
+CONTENT_NS = {"content": "http://purl.org/rss/1.0/modules/content/"}
 CHECK_INTERVAL_SEC = 600  # 10 dakika
 REQUEST_TIMEOUT_SEC = 20
-MAX_SEEN = 300
+SEND_DELAY_SEC = 0.5  # ayrı mesajlar arasında Telegram'ı yormamak icin
+MAX_SEEN = 500
+
+
+def extract_content(encoded_html):
+    """content:encoded alanındaki HTML'den (resim hariç) düz metni çıkarır."""
+    text = re.sub(r"<figure>.*?</figure>", "", encoded_html, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", "", text)
+    return html.unescape(text).strip()
 
 
 def fetch_rss_items():
-    """RSS akışından (başlık, link, tarih) listesini döner, artan zamanla değil
-    akışın verdiği sırayla (en yeni genelde en üstte)."""
+    """RSS akışından haber listesini döner (akışın verdiği sırayla, en yeni
+    genelde en üstte)."""
     req = urllib.request.Request(RSS_URL, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
         data = resp.read()
@@ -47,8 +57,9 @@ def fetch_rss_items():
     for item in root.findall("./channel/item"):
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
+        encoded = item.findtext("content:encoded", namespaces=CONTENT_NS) or ""
         if title and link:
-            items.append({"title": title, "link": link})
+            items.append({"title": title, "link": link, "icerik": extract_content(encoded)})
     return items
 
 
@@ -65,12 +76,13 @@ def save_seen(seen):
     STATE_FILE.write_text(json.dumps(seen[-MAX_SEEN:], ensure_ascii=False, indent=2))
 
 
-def format_message(new_items):
-    lines = ["<b>📰 BIST Piyasa Haberleri</b>", ""]
-    for it in new_items:
-        title = html.escape(it["title"])
-        link = html.escape(it["link"], quote=True)
-        lines.append(f'• <a href="{link}">{title}</a>')
+def format_message(item):
+    title = html.escape(item["title"])
+    link = html.escape(item["link"], quote=True)
+    lines = [f'<b>📰 <a href="{link}">{title}</a></b>']
+    if item["icerik"]:
+        lines.append("")
+        lines.append(html.escape(item["icerik"]))
     return "\n".join(lines)
 
 
@@ -101,10 +113,12 @@ def main():
             save_seen(seen)
             first_run = False
         elif new_items:
-            print(f"{len(new_items)} yeni haber bulundu, gönderiliyor...")
-            # RSS'te en yeni en üstte gelir, mesajda eskiden yeniye sırala.
-            send_telegram_message(token, chat_id, format_message(list(reversed(new_items))))
-            seen.extend(it["link"] for it in new_items)
+            print(f"{len(new_items)} yeni haber bulundu, ayrı ayrı gönderiliyor...")
+            # RSS'te en yeni en üstte gelir, eskiden yeniye sırayla gönder.
+            for it in reversed(new_items):
+                send_telegram_message(token, chat_id, format_message(it))
+                seen.append(it["link"])
+                time.sleep(SEND_DELAY_SEC)
             save_seen(seen)
         else:
             print("Yeni haber yok.")
