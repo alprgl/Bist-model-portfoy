@@ -5,8 +5,11 @@ BIST PİYASA HABERLERİ ALARMI
 ==============================
 Foreks'in ekonomi RSS akışını periyodik olarak tarar (BIST'i doğrudan ya
 da dolaylı etkileyebilecek şirket, faiz, TCMB, kur, küresel piyasa gibi
-haberler). Yeni bir haber bulunca, başlığını ve kısa içerik özetini
-Telegram'a AYRI birer push mesajı olarak gönderir.
+haberler). Yeni bir haber bulunca, başlığını, kısa içerik özetini ve
+Claude (Anthropic API) ile çıkarılan BIST etki analizini (Olumlu/Olumsuz/
+Notr yönü, 1-10 şiddet puanı, gerekçe) Telegram'a AYRI birer push mesajı
+olarak gönderir. anthropic_config.json yoksa ya da API çağrısı başarısız
+olursa analiz sessizce atlanır, haber yine de gönderilir.
 
 Sürekli çalışan bir süreçtir (launchd KeepAlive ile arka planda hep açık
 tutulur), her CHECK_INTERVAL_SEC saniyede bir RSS akışını kontrol eder.
@@ -180,7 +183,8 @@ def main():
             print(f"{len(new_items)} yeni haber bulundu, ayrı ayrı gönderiliyor...")
             # RSS'te en yeni en üstte gelir, eskiden yeniye sırayla gönder.
             for it in reversed(new_items):
-                send_telegram_message(token, chat_id, format_message(it))
+                analysis = analyze_impact(it)
+                send_telegram_message(token, chat_id, format_message(it, analysis))
                 seen.append(it["link"])
                 time.sleep(SEND_DELAY_SEC)
             save_seen(seen)
