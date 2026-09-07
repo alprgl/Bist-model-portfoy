@@ -167,11 +167,9 @@ def next_gun_no(kayit):
 
 
 def format_gun_ozet(kayit):
-    skor = kayit["skor"]
-    emoji = "🟢" if skor > 0 else ("🔴" if skor < 0 else "⚪")
-    isaret = "+" if skor > 0 else ""
-    return (f"📊 Gün skoru: {emoji} {isaret}{skor} | {kayit['toplam']} haber "
-            f"({kayit['olumlu']}🟢 {kayit['olumsuz']}🔴 {kayit['notr']}⚪)")
+    # Skor/notr/toplam alanlari kayitta tutulmaya devam eder, mesajda sadece
+    # olumlu-olumsuz kirilimi gosterilir.
+    return f"📊 Gün skoru: ({kayit['olumlu']}🟢 {kayit['olumsuz']}🔴)"
 
 
 def parse_analysis(text):
