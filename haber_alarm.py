@@ -7,10 +7,13 @@ Foreks'in ekonomi RSS akışını periyodik olarak tarar (BIST'i doğrudan ya
 da dolaylı etkileyebilecek şirket, faiz, TCMB, kur, küresel piyasa gibi
 haberler). Yeni bir haber bulunca, başlığını, kısa içerik özetini ve
 yerel Ollama modeliyle (ücretsiz, API maliyeti yok) çıkarılan BIST etki
-analizini (Olumlu/Olumsuz/Notr yönü, 1-10 şiddet puanı, gerekçe)
-Telegram'a AYRI birer push mesajı olarak gönderir. Ollama çalışmıyorsa
-ya da çağrı başarısız olursa analiz sessizce atlanır, haber yine de
-gönderilir.
+analizini (Olumlu/Olumsuz/Notr yönü, 1-10 şiddet puanı, gerekçe) ve
+haberin tarihi + o güne ait sıra numarasını Telegram'a AYRI birer push
+mesajı olarak gönderir. Şiddet puanı HABER_MIN_SIDDET'in altında olan
+haberler (önemsiz kabul edilip) gönderilmez - bilgisayar uzun süre
+kapalı kalıp bir anda çok sayıda haber birikince spam'i azaltır. Ollama
+çalışmıyorsa ya da çağrı başarısız olursa analiz sessizce atlanır,
+haber yine de (filtresiz) gönderilir.
 
 Gereksinim: Ollama kurulu ve çalışıyor olmalı (brew install ollama;
 brew services start ollama), OLLAMA_MODEL'de tanımlı model indirilmiş
@@ -32,13 +35,15 @@ import re
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from supertrend_alarm import ISTANBUL_TZ, load_telegram_config, send_telegram_message
 
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "haber_alarm_state.json"
+GUN_SAYAC_FILE = BASE_DIR / "haber_gun_sayac.json"
 RSS_URL = "https://www.foreks.com/rss/"
 CONTENT_NS = {"content": "http://purl.org/rss/1.0/modules/content/"}
 CHECK_INTERVAL_SEC = 600  # 10 dakika
@@ -48,6 +53,7 @@ MAX_SEEN = 500
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen2.5:7b-instruct"
 OLLAMA_TIMEOUT_SEC = 90  # yerel model ilk yuklemede yavas olabilir
+HABER_MIN_SIDDET = 6  # bu puanin altindaki haberler periyodik alarmda gonderilmez
 
 YON_EMOJI = {"Olumlu": "🟢", "Olumsuz": "🔴", "Notr": "⚪"}
 
@@ -57,6 +63,17 @@ def extract_content(encoded_html):
     text = re.sub(r"<figure>.*?</figure>", "", encoded_html, flags=re.DOTALL)
     text = re.sub(r"<[^>]+>", "", text)
     return html.unescape(text).strip()
+
+
+def parse_pubdate(pubdate_str):
+    """RSS pubDate metnini (RFC 2822) Istanbul saatine cevirir. Ayristirilamazsa None doner."""
+    try:
+        dt = parsedate_to_datetime(pubdate_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ISTANBUL_TZ)
+    except Exception:
+        return None
 
 
 def fetch_rss_items():
@@ -72,8 +89,14 @@ def fetch_rss_items():
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
         encoded = item.findtext("content:encoded", namespaces=CONTENT_NS) or ""
+        tarih = parse_pubdate(item.findtext("pubDate") or "") or datetime.now(ISTANBUL_TZ)
         if title and link:
-            items.append({"title": title, "link": link, "icerik": extract_content(encoded)})
+            items.append({
+                "title": title,
+                "link": link,
+                "icerik": extract_content(encoded),
+                "gun_str": tarih.strftime("%d.%m.%Y"),
+            })
     return items
 
 
@@ -88,6 +111,26 @@ def load_seen():
 
 def save_seen(seen):
     STATE_FILE.write_text(json.dumps(seen[-MAX_SEEN:], ensure_ascii=False, indent=2))
+
+
+def load_gun_sayac():
+    if GUN_SAYAC_FILE.exists():
+        try:
+            return json.loads(GUN_SAYAC_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_gun_sayac(sayac):
+    GUN_SAYAC_FILE.write_text(json.dumps(sayac, ensure_ascii=False, indent=2))
+
+
+def next_gun_no(sayac, gun_str):
+    """Verilen gun icin (gonderilen) kacinci haber oldugunu dondurur, sayaci artirir."""
+    n = sayac.get(gun_str, 0) + 1
+    sayac[gun_str] = n
+    return n
 
 
 def parse_analysis(text):
@@ -136,10 +179,13 @@ def analyze_impact(item):
         return None
 
 
-def format_message(item, analysis=None):
+def format_message(item, analysis=None, gun_no=None):
     title = html.escape(item["title"])
     link = html.escape(item["link"], quote=True)
-    lines = [f'<b>📰 <a href="{link}">{title}</a></b>']
+    lines = []
+    if item.get("gun_str") and gun_no is not None:
+        lines.append(f"📅 {item['gun_str']} — Haber #{gun_no}")
+    lines.append(f'<b>📰 <a href="{link}">{title}</a></b>')
     if item["icerik"]:
         lines.append("")
         lines.append(html.escape(item["icerik"]))
@@ -160,6 +206,7 @@ def main():
 
     print("Haber alarmı başladı, RSS periyodik olarak taranacak...")
     seen = load_seen()
+    sayac = load_gun_sayac()
     first_run = not seen
 
     while True:
@@ -179,14 +226,22 @@ def main():
             save_seen(seen)
             first_run = False
         elif new_items:
-            print(f"{len(new_items)} yeni haber bulundu, ayrı ayrı gönderiliyor...")
-            # RSS'te en yeni en üstte gelir, eskiden yeniye sırayla gönder.
+            print(f"{len(new_items)} yeni haber bulundu, değerlendiriliyor...")
+            # RSS'te en yeni en üstte gelir, eskiden yeniye sırayla işle.
+            gonderilen = 0
             for it in reversed(new_items):
                 analysis = analyze_impact(it)
-                send_telegram_message(token, chat_id, format_message(it, analysis))
                 seen.append(it["link"])
+                if analysis and analysis["puan"] < HABER_MIN_SIDDET:
+                    print(f"  Düşük şiddet ({analysis['puan']}/10), atlandı: {it['title'][:50]}")
+                    continue
+                gun_no = next_gun_no(sayac, it["gun_str"])
+                send_telegram_message(token, chat_id, format_message(it, analysis, gun_no))
+                gonderilen += 1
                 time.sleep(SEND_DELAY_SEC)
+            print(f"  {gonderilen}/{len(new_items)} haber gönderildi (şiddet < {HABER_MIN_SIDDET} olanlar atlandı).")
             save_seen(seen)
+            save_gun_sayac(sayac)
         else:
             now_str = datetime.now(ISTANBUL_TZ).strftime("%Y-%m-%d %H:%M")
             print(f"Yeni haber yok. ({now_str})")

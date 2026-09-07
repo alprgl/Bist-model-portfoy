@@ -322,9 +322,13 @@ def handle_haber(token, chat_id):
         send_telegram_message(token, chat_id, "Şu an gösterilecek haber yok.")
         return
     # RSS'te en yeni en üstte gelir; eskiden yeniye gönder, en yeni sohbette en altta olsun.
+    # Gun ici sira numarasi burada sadece bu istek icin hesaplanir, kalici
+    # haber_gun_sayac.json'a (periyodik alarmin sayacina) dokunmaz.
+    gun_sayaclari = {}
     for it in reversed(items[:HABER_LIMIT]):
         analysis = analyze_impact(it)
-        send_telegram_message(token, chat_id, format_haber_message(it, analysis))
+        gun_sayaclari[it["gun_str"]] = gun_sayaclari.get(it["gun_str"], 0) + 1
+        send_telegram_message(token, chat_id, format_haber_message(it, analysis, gun_sayaclari[it["gun_str"]]))
         time.sleep(HABER_SEND_DELAY_SEC)
 
 
