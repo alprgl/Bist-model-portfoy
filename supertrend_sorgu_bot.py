@@ -41,7 +41,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from haber_alarm import analyze_impact, fetch_rss_items, format_message as format_haber_message
+from haber_alarm import (
+    analyze_impact,
+    fetch_rss_items,
+    format_message as format_haber_message,
+    gun_kaydi,
+    load_gun_sayac,
+)
 from supertrend_alarm import (
     BIST30_TICKERS,
     REQUEST_DELAY_SEC,
@@ -322,13 +328,18 @@ def handle_haber(token, chat_id):
         send_telegram_message(token, chat_id, "Şu an gösterilecek haber yok.")
         return
     # RSS'te en yeni en üstte gelir; eskiden yeniye gönder, en yeni sohbette en altta olsun.
-    # Gun ici sira numarasi burada sadece bu istek icin hesaplanir, kalici
-    # haber_gun_sayac.json'a (periyodik alarmin sayacina) dokunmaz.
+    # Sira numarasi bu istek icin gecici sayilir; gun skoru ise periyodik alarmin
+    # biriktirdigi kalici kayittan okunur (dosyaya yazilmaz, cift sayim olmaz).
+    sayac = load_gun_sayac()
     gun_sayaclari = {}
     for it in reversed(items[:HABER_LIMIT]):
         analysis = analyze_impact(it)
         gun_sayaclari[it["gun_str"]] = gun_sayaclari.get(it["gun_str"], 0) + 1
-        send_telegram_message(token, chat_id, format_haber_message(it, analysis, gun_sayaclari[it["gun_str"]]))
+        kayit = gun_kaydi(sayac, it["gun_str"])
+        send_telegram_message(
+            token, chat_id,
+            format_haber_message(it, analysis, gun_sayaclari[it["gun_str"]], kayit),
+        )
         time.sleep(HABER_SEND_DELAY_SEC)
 
 

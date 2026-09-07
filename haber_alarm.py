@@ -8,8 +8,9 @@ da dolaylı etkileyebilecek şirket, faiz, TCMB, kur, küresel piyasa gibi
 haberler). Yeni bir haber bulunca, başlığını, kısa içerik özetini ve
 yerel Ollama modeliyle (ücretsiz, API maliyeti yok) çıkarılan BIST etki
 analizini (Olumlu/Olumsuz/Notr yönü, 1-10 şiddet puanı, gerekçe) ve
-haberin tarihi + o güne ait sıra numarasını Telegram'a AYRI birer push
-mesajı olarak gönderir. Şiddet puanı HABER_MIN_SIDDET'in altında olan
+haberin tarihi + o güne ait sıra numarasını ve günün kümülatif skorunu
+(Olumlu +puan, Olumsuz -puan; gönderilmeyen haberler dahil TÜM haberler
+sayılır) Telegram'a AYRI birer push mesajı olarak gönderir. Şiddet puanı HABER_MIN_SIDDET'in altında olan
 haberler (önemsiz kabul edilip) gönderilmez - bilgisayar uzun süre
 kapalı kalıp bir anda çok sayıda haber birikince spam'i azaltır. Ollama
 çalışmıyorsa ya da çağrı başarısız olursa analiz sessizce atlanır,
@@ -126,11 +127,51 @@ def save_gun_sayac(sayac):
     GUN_SAYAC_FILE.write_text(json.dumps(sayac, ensure_ascii=False, indent=2))
 
 
-def next_gun_no(sayac, gun_str):
-    """Verilen gun icin (gonderilen) kacinci haber oldugunu dondurur, sayaci artirir."""
-    n = sayac.get(gun_str, 0) + 1
-    sayac[gun_str] = n
-    return n
+def bos_gun_kaydi():
+    return {"gonderilen": 0, "toplam": 0, "skor": 0, "olumlu": 0, "olumsuz": 0, "notr": 0}
+
+
+def gun_kaydi(sayac, gun_str):
+    """Gunun kaydini doner. Eski surumde sadece duz bir sayi tutuluyordu,
+    o format da yeni yapiya tasinir."""
+    kayit = sayac.get(gun_str)
+    if isinstance(kayit, int):
+        kayit = {**bos_gun_kaydi(), "gonderilen": kayit}
+    elif not isinstance(kayit, dict):
+        kayit = bos_gun_kaydi()
+    sayac[gun_str] = kayit
+    return kayit
+
+
+def gune_isle(sayac, gun_str, analysis):
+    """Haberi gunun kumulatif skoruna isler (mesaj gonderilsin gonderilmesin
+    tum haberler sayilir). Olumlu +puan, Olumsuz -puan, Notr 0."""
+    kayit = gun_kaydi(sayac, gun_str)
+    kayit["toplam"] += 1
+    if analysis:
+        if analysis["yon"] == "Olumlu":
+            kayit["skor"] += analysis["puan"]
+            kayit["olumlu"] += 1
+        elif analysis["yon"] == "Olumsuz":
+            kayit["skor"] -= analysis["puan"]
+            kayit["olumsuz"] += 1
+        else:
+            kayit["notr"] += 1
+    return kayit
+
+
+def next_gun_no(kayit):
+    """Gonderilen haber sayacini artirip yeni degeri doner."""
+    kayit["gonderilen"] += 1
+    return kayit["gonderilen"]
+
+
+def format_gun_ozet(kayit):
+    skor = kayit["skor"]
+    emoji = "🟢" if skor > 0 else ("🔴" if skor < 0 else "⚪")
+    isaret = "+" if skor > 0 else ""
+    return (f"📊 Gün skoru: {emoji} {isaret}{skor} | {kayit['toplam']} haber "
+            f"({kayit['olumlu']}🟢 {kayit['olumsuz']}🔴 {kayit['notr']}⚪)")
 
 
 def parse_analysis(text):
@@ -179,7 +220,7 @@ def analyze_impact(item):
         return None
 
 
-def format_message(item, analysis=None, gun_no=None):
+def format_message(item, analysis=None, gun_no=None, gun_kaydi_=None):
     title = html.escape(item["title"])
     link = html.escape(item["link"], quote=True)
     lines = []
@@ -195,6 +236,9 @@ def format_message(item, analysis=None, gun_no=None):
         lines.append(f"{emoji} <b>{analysis['yon']}</b> — Şiddet: {analysis['puan']}/10")
         if analysis["gerekce"]:
             lines.append(html.escape(analysis["gerekce"]))
+    if gun_kaydi_:
+        lines.append("")
+        lines.append(format_gun_ozet(gun_kaydi_))
     return "\n".join(lines)
 
 
@@ -232,11 +276,13 @@ def main():
             for it in reversed(new_items):
                 analysis = analyze_impact(it)
                 seen.append(it["link"])
+                # Gonderilmeyen haberler de gunun kumulatif skoruna dahil edilir.
+                kayit = gune_isle(sayac, it["gun_str"], analysis)
                 if analysis and analysis["puan"] < HABER_MIN_SIDDET:
                     print(f"  Düşük şiddet ({analysis['puan']}/10), atlandı: {it['title'][:50]}")
                     continue
-                gun_no = next_gun_no(sayac, it["gun_str"])
-                send_telegram_message(token, chat_id, format_message(it, analysis, gun_no))
+                gun_no = next_gun_no(kayit)
+                send_telegram_message(token, chat_id, format_message(it, analysis, gun_no, kayit))
                 gonderilen += 1
                 time.sleep(SEND_DELAY_SEC)
             print(f"  {gonderilen}/{len(new_items)} haber gönderildi (şiddet < {HABER_MIN_SIDDET} olanlar atlandı).")
