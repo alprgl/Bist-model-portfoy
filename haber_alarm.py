@@ -128,16 +128,20 @@ def save_gun_sayac(sayac):
 
 
 def bos_gun_kaydi():
-    return {"gonderilen": 0, "toplam": 0, "skor": 0, "olumlu": 0, "olumsuz": 0, "notr": 0}
+    return {"gonderilen": 0, "toplam": 0, "skor": 0,
+            "olumlu": 0, "olumsuz": 0, "notr": 0,
+            "olumlu_puan": 0, "olumsuz_puan": 0}
 
 
 def gun_kaydi(sayac, gun_str):
-    """Gunun kaydini doner. Eski surumde sadece duz bir sayi tutuluyordu,
-    o format da yeni yapiya tasinir."""
+    """Gunun kaydini doner. Eski surumlerdeki eksik alanlar (ya da duz sayi
+    formati) yeni yapiya tamamlanir."""
     kayit = sayac.get(gun_str)
     if isinstance(kayit, int):
         kayit = {**bos_gun_kaydi(), "gonderilen": kayit}
-    elif not isinstance(kayit, dict):
+    elif isinstance(kayit, dict):
+        kayit = {**bos_gun_kaydi(), **kayit}
+    else:
         kayit = bos_gun_kaydi()
     sayac[gun_str] = kayit
     return kayit
@@ -152,9 +156,11 @@ def gune_isle(sayac, gun_str, analysis):
         if analysis["yon"] == "Olumlu":
             kayit["skor"] += analysis["puan"]
             kayit["olumlu"] += 1
+            kayit["olumlu_puan"] += analysis["puan"]
         elif analysis["yon"] == "Olumsuz":
             kayit["skor"] -= analysis["puan"]
             kayit["olumsuz"] += 1
+            kayit["olumsuz_puan"] += analysis["puan"]
         else:
             kayit["notr"] += 1
     return kayit
@@ -167,9 +173,18 @@ def next_gun_no(kayit):
 
 
 def format_gun_ozet(kayit):
-    # Skor/notr/toplam alanlari kayitta tutulmaya devam eder, mesajda sadece
-    # olumlu-olumsuz kirilimi gosterilir.
-    return f"📊 Gün skoru: ({kayit['olumlu']}🟢 {kayit['olumsuz']}🔴)"
+    """Gunun haber akisini siddet puani agirlikli gosterir: olumlu puanlarin
+    toplam yonlu puana orani, gunun yuzde kacinin iyi haberle gectigini verir.
+    Notr haberler yon tasimadigi icin bu hesaba girmez."""
+    iyi_puan = kayit["olumlu_puan"]
+    kotu_puan = kayit["olumsuz_puan"]
+    toplam_puan = iyi_puan + kotu_puan
+    if toplam_puan == 0:
+        return "📊 Gün akışı: henüz yönlü haber yok"
+    yuzde = round(iyi_puan / toplam_puan * 100)
+    return (f"📊 Gün akışı: %{yuzde} olumlu\n"
+            f"🟢 {kayit['olumlu']} haber · {iyi_puan} puan   "
+            f"🔴 {kayit['olumsuz']} haber · {kotu_puan} puan")
 
 
 def parse_analysis(text):
