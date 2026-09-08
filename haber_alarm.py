@@ -182,9 +182,7 @@ def format_gun_ozet(kayit):
     if toplam_puan == 0:
         return "📊 Gün akışı: henüz yönlü haber yok"
     yuzde = round(iyi_puan / toplam_puan * 100)
-    return (f"📊 Gün akışı: %{yuzde} olumlu\n"
-            f"🟢 {kayit['olumlu']} haber · {iyi_puan} puan   "
-            f"🔴 {kayit['olumsuz']} haber · {kotu_puan} puan")
+    return f"📊 Gün akışı: %{yuzde} olumlu"
 
 
 def parse_analysis(text):
