@@ -51,6 +51,7 @@ CHECK_INTERVAL_SEC = 600  # 10 dakika
 REQUEST_TIMEOUT_SEC = 20
 SEND_DELAY_SEC = 0.5  # ayrı mesajlar arasında Telegram'ı yormamak icin
 MAX_SEEN = 500
+MAX_GUN = 30  # gun sayac dosyasinda tutulacak gun sayisi
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen2.5:7b-instruct"
 OLLAMA_TIMEOUT_SEC = 90  # yerel model ilk yuklemede yavas olabilir
@@ -124,23 +125,28 @@ def load_gun_sayac():
 
 
 def save_gun_sayac(sayac):
-    GUN_SAYAC_FILE.write_text(json.dumps(sayac, ensure_ascii=False, indent=2))
+    # Dosya suresiz buyumesin: en yeni MAX_GUN gunu tut.
+    gunler = sorted(sayac, key=lambda g: g.split(".")[::-1])[-MAX_GUN:]
+    GUN_SAYAC_FILE.write_text(
+        json.dumps({g: sayac[g] for g in gunler}, ensure_ascii=False, indent=2)
+    )
 
 
 def bos_gun_kaydi():
-    return {"gonderilen": 0, "toplam": 0, "skor": 0,
-            "olumlu": 0, "olumsuz": 0, "notr": 0,
-            "olumlu_puan": 0, "olumsuz_puan": 0}
+    # haberler: [[yon, puan], ...] - ham kayit tutulur ki gosterilecek metrik
+    # degistiginde gunun gecmisi sifirdan baslamak zorunda kalmasin.
+    return {"gonderilen": 0, "haberler": []}
 
 
 def gun_kaydi(sayac, gun_str):
-    """Gunun kaydini doner. Eski surumlerdeki eksik alanlar (ya da duz sayi
-    formati) yeni yapiya tamamlanir."""
+    """Gunun kaydini doner. Eski surumlerdeki formatlar (duz sayi ya da
+    toplam/skor tutan sozluk) yeni yapiya tasinir."""
     kayit = sayac.get(gun_str)
     if isinstance(kayit, int):
-        kayit = {**bos_gun_kaydi(), "gonderilen": kayit}
+        kayit = {"gonderilen": kayit, "haberler": []}
     elif isinstance(kayit, dict):
-        kayit = {**bos_gun_kaydi(), **kayit}
+        kayit = {"gonderilen": kayit.get("gonderilen", 0),
+                 "haberler": kayit.get("haberler", [])}
     else:
         kayit = bos_gun_kaydi()
     sayac[gun_str] = kayit
@@ -148,21 +154,13 @@ def gun_kaydi(sayac, gun_str):
 
 
 def gune_isle(sayac, gun_str, analysis):
-    """Haberi gunun kumulatif skoruna isler (mesaj gonderilsin gonderilmesin
-    tum haberler sayilir). Olumlu +puan, Olumsuz -puan, Notr 0."""
+    """Haberi gunun kaydina ekler (mesaj gonderilsin gonderilmesin TUM
+    haberler islenir). Analiz yapilamadiysa yonsuz olarak kaydedilir."""
     kayit = gun_kaydi(sayac, gun_str)
-    kayit["toplam"] += 1
     if analysis:
-        if analysis["yon"] == "Olumlu":
-            kayit["skor"] += analysis["puan"]
-            kayit["olumlu"] += 1
-            kayit["olumlu_puan"] += analysis["puan"]
-        elif analysis["yon"] == "Olumsuz":
-            kayit["skor"] -= analysis["puan"]
-            kayit["olumsuz"] += 1
-            kayit["olumsuz_puan"] += analysis["puan"]
-        else:
-            kayit["notr"] += 1
+        kayit["haberler"].append([analysis["yon"], analysis["puan"]])
+    else:
+        kayit["haberler"].append(["Bilinmiyor", 0])
     return kayit
 
 
@@ -176,8 +174,8 @@ def format_gun_ozet(kayit):
     """Gunun haber akisini siddet puani agirlikli gosterir: olumlu puanlarin
     toplam yonlu puana orani, gunun yuzde kacinin iyi haberle gectigini verir.
     Notr haberler yon tasimadigi icin bu hesaba girmez."""
-    iyi_puan = kayit["olumlu_puan"]
-    kotu_puan = kayit["olumsuz_puan"]
+    iyi_puan = sum(p for yon, p in kayit["haberler"] if yon == "Olumlu")
+    kotu_puan = sum(p for yon, p in kayit["haberler"] if yon == "Olumsuz")
     toplam_puan = iyi_puan + kotu_puan
     if toplam_puan == 0:
         return "📊 Gün akışı: henüz yönlü haber yok"

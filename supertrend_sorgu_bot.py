@@ -42,6 +42,7 @@ import urllib.request
 from pathlib import Path
 
 from haber_alarm import (
+    HABER_MIN_SIDDET,
     analyze_impact,
     fetch_rss_items,
     format_message as format_haber_message,
@@ -85,8 +86,8 @@ HELP_TEXT = (
     "<b>/gunici</b>\n"
     "BIST 30'u tarar; 5dk+15dk+1s'in ÜÇÜ BİRDEN AL'da olan, en az birinde hacim girişi ve en az birinde RSI teyidi olan gün içi trade adaylarını listeler (geçmiş trende bakmaz, sadece anlık gücü ölçer, birkaç dakika sürebilir).\n\n"
     "<b>/haber</b>\n"
-    f"Son {HABER_LIMIT} ekonomi haberini tek tek, ayrı mesajlar halinde gönderir (liste olarak değil). "
-    "Her haberin altına BIST için olumlu/olumsuz yönü, 10 üzerinden şiddeti ve kısa gerekçesi eklenir.\n\n"
+    f"Son {HABER_LIMIT} ekonomi haberinden şiddeti {HABER_MIN_SIDDET}+ olanları tek tek, ayrı mesajlar halinde gönderir (liste olarak değil). "
+    "Her haberin altına BIST için olumlu/olumsuz yönü, 10 üzerinden şiddeti, kısa gerekçesi ve günün akış yüzdesi eklenir.\n\n"
     "<b>/help</b>\n"
     "Bu mesajı gösterir."
 )
@@ -332,13 +333,23 @@ def handle_haber(token, chat_id):
     # biriktirdigi kalici kayittan okunur (dosyaya yazilmaz, cift sayim olmaz).
     sayac = load_gun_sayac()
     gun_sayaclari = {}
+    gonderilen = 0
     for it in reversed(items[:HABER_LIMIT]):
         analysis = analyze_impact(it)
+        # Periyodik alarmla ayni esik: dusuk siddetli haberler gosterilmez.
+        if analysis and analysis["puan"] < HABER_MIN_SIDDET:
+            continue
         gun_sayaclari[it["gun_str"]] = gun_sayaclari.get(it["gun_str"], 0) + 1
         kayit = gun_kaydi(sayac, it["gun_str"])
         send_telegram_message(
             token, chat_id,
             format_haber_message(it, analysis, gun_sayaclari[it["gun_str"]], kayit),
+        )
+        gonderilen += 1
+    if not gonderilen:
+        send_telegram_message(
+            token, chat_id,
+            f"Son {HABER_LIMIT} haberin hepsi düşük şiddetli (< {HABER_MIN_SIDDET}), gösterilecek önemli haber yok.",
         )
         time.sleep(HABER_SEND_DELAY_SEC)
 
