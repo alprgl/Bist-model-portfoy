@@ -52,6 +52,7 @@ REQUEST_TIMEOUT_SEC = 20
 SEND_DELAY_SEC = 0.5  # ayrı mesajlar arasında Telegram'ı yormamak icin
 MAX_SEEN = 500
 MAX_GUN = 30  # gun sayac dosyasinda tutulacak gun sayisi
+MIN_YONLU_HABER = 3  # bu sayidan az yonlu haberde yuzde gosterilmez (yaniltici olur)
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen2.5:7b-instruct"
 OLLAMA_TIMEOUT_SEC = 90  # yerel model ilk yuklemede yavas olabilir
@@ -174,8 +175,11 @@ def format_gun_ozet(kayit):
     """Gunun haber akisini siddet puani agirlikli gosterir: olumlu puanlarin
     toplam yonlu puana orani, gunun yuzde kacinin iyi haberle gectigini verir.
     Notr haberler yon tasimadigi icin bu hesaba girmez."""
-    iyi_puan = sum(p for yon, p in kayit["haberler"] if yon == "Olumlu")
-    kotu_puan = sum(p for yon, p in kayit["haberler"] if yon == "Olumsuz")
+    yonlu = [(yon, p) for yon, p in kayit["haberler"] if yon in ("Olumlu", "Olumsuz")]
+    if len(yonlu) < MIN_YONLU_HABER:
+        return f"📊 Gün akışı: yeterli veri yok ({len(yonlu)} yönlü haber)"
+    iyi_puan = sum(p for yon, p in yonlu if yon == "Olumlu")
+    kotu_puan = sum(p for yon, p in yonlu if yon == "Olumsuz")
     toplam_puan = iyi_puan + kotu_puan
     if toplam_puan == 0:
         return "📊 Gün akışı: henüz yönlü haber yok"
