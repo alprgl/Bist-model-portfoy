@@ -14,6 +14,8 @@ KeepAlive ile arka planda hep açık tutulur).
 KOMUTLAR (Telegram'dan bota yaz)
 ---------------------------------
     /analiz THYAO   -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
+    /tara           -> analiz alarmının şartlarını (5m/15m/1h/2h AL + RSI +
+                        hacim) tüm BIST 30'da anında çalıştırır
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
@@ -38,6 +40,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from analiz_alarm import ANALIZ_TIMEFRAMES, TIMEFRAME_ADLARI, hisseyi_degerlendir
 from haber_alarm import (
     HABER_MIN_SIDDET,
     analyze_impact,
@@ -74,6 +77,8 @@ HELP_TEXT = (
     "<b>🤖 Supertrend Sorgu Botu - Komutlar</b>\n\n"
     "<b>/analiz HISSE</b>  (örn. /analiz THYAO)\n"
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
+    "<b>/tara</b>\n"
+    "Analiz alarmının şartlarını (5m/15m/1h/2h'nin hepsinde AL + RSI teyidi, en az birinde yüksek hacim) tüm BIST 30'da anında çalıştırır; alarmın bir sonraki taramasını beklemeden sonucu verir. Şartı sağlayan yoksa 'yakın olanları' da gösterir (~1-2 dakika).\n\n"
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
     "<b>/firsat</b>\n"
@@ -146,6 +151,60 @@ def handle_analiz(token, chat_id, arg):
         send_telegram_message(token, chat_id, f"'{ticker}' için veri alınamadı, hisse kodunu kontrol et.")
         return
     send_telegram_message(token, chat_id, format_multi(ticker, results))
+
+
+def format_tara(uyanlar, yakinlar):
+    """Analiz alarminin sartlarini manuel taramanin sonucunu bicimlendirir."""
+    zamanlar = "/".join(TIMEFRAME_ADLARI[t] for t in ANALIZ_TIMEFRAMES)
+    now_str = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+    lines = [f"<b>🔍 Analiz Taraması ({zamanlar})</b>", now_str, ""]
+
+    if uyanlar:
+        lines.append("<b>✅ Şartların hepsini sağlayan:</b>")
+        for ticker, d in uyanlar:
+            detay = " · ".join(
+                f"{TIMEFRAME_ADLARI[tf]} %{d[tf]['mesafe_pct']:.1f}" for tf in ANALIZ_TIMEFRAMES
+            )
+            lines.append(f"• <b>{ticker}</b> — {detay} 🔥")
+    else:
+        lines.append("✅ Şartların hepsini sağlayan hisse yok.")
+
+    if yakinlar:
+        lines.append("")
+        lines.append("<b>⚠️ Yakın olanlar</b> (4/4 AL ama teyit eksik):")
+        for ticker, rsi_sayi, hacim in yakinlar:
+            eksik = []
+            if rsi_sayi < len(ANALIZ_TIMEFRAMES):
+                eksik.append(f"RSI {rsi_sayi}/{len(ANALIZ_TIMEFRAMES)}")
+            if not hacim:
+                eksik.append("hacim yok")
+            lines.append(f"• {ticker} — {', '.join(eksik)}")
+    return "\n".join(lines)
+
+
+def handle_tara(token, chat_id):
+    universe = BIST30_TICKERS
+    send_telegram_message(
+        token, chat_id,
+        f"{len(universe)} hisse taranıyor (5m/15m/1h/2h), ~1-2 dakika sürer...",
+    )
+    uyanlar, yakinlar = [], []
+    for ticker in universe:
+        try:
+            uygun, durumlar = hisseyi_degerlendir(ticker)
+        except Exception as e:
+            print(f"  {ticker}: hata - {e}")
+            continue
+        if not all(durumlar.values()):
+            continue
+        if uygun:
+            uyanlar.append((ticker, durumlar))
+            continue
+        if all(durumlar[tf]["yon"] == 1 for tf in ANALIZ_TIMEFRAMES):
+            rsi_sayi = sum(1 for tf in ANALIZ_TIMEFRAMES if durumlar[tf]["rsi_uygun"])
+            hacim = any(durumlar[tf]["yuksek_hacim"] for tf in ANALIZ_TIMEFRAMES)
+            yakinlar.append((ticker, rsi_sayi, hacim))
+    send_telegram_message(token, chat_id, format_tara(uyanlar, yakinlar))
 
 
 def format_liste(ranked, top_n=10):
@@ -281,7 +340,7 @@ def main():
         print("UYARI: Telegram ayari yok, dinleyici baslatilamiyor.")
         return
 
-    print("Anlik sorgu botu dinlemeye basladi (/analiz HISSE, /liste, /firsat, /haber)...")
+    print("Anlik sorgu botu dinlemeye basladi (/analiz HISSE, /tara, /liste, /firsat, /haber)...")
     offset = load_offset()
 
     while True:
@@ -309,6 +368,13 @@ def main():
                 print(f"Komut alindi: /analiz {arg}")
                 try:
                     handle_analiz(token, chat_id, arg)
+                except Exception as e:
+                    print(f"Komut isleme hatasi: {e}")
+                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
+            elif text == "/tara":
+                print("Komut alindi: /tara")
+                try:
+                    handle_tara(token, chat_id)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
