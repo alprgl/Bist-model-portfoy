@@ -13,15 +13,12 @@ KeepAlive ile arka planda hep açık tutulur).
 
 KOMUTLAR (Telegram'dan bota yaz)
 ---------------------------------
-    /durum          -> BIST 30'daki tüm hisselerin anlık (1S) trend yönü
     /durum THYAO    -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
     /firsat         -> 1g'de sert düşmüş ama 1s'de AL'a dönmüş ve hacim
                         girişi olan (fırsat) hisseleri tarar
-    /gunici         -> 5dk+15dk+1s hepsi AL, hacim girişi ve RSI teyidi
-                        olan gün içi trade adaylarını tarar
     /haber          -> son ekonomi haberlerini tek tek, ayrı mesajlar
                         halinde gönderir (liste değil)
     /start          -> tanıtım/giriş mesajını gösterir
@@ -75,16 +72,12 @@ WELCOME_TEXT = (
 
 HELP_TEXT = (
     "<b>🤖 Supertrend Sorgu Botu - Komutlar</b>\n\n"
-    "<b>/durum</b>\n"
-    "BIST 30'daki tüm hisselerin anlık (1 saatlik) trend yönünü listeler.\n\n"
     "<b>/durum HISSE</b>  (örn. /durum THYAO)\n"
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
     "<b>/firsat</b>\n"
     "BIST 30'u tarar; 1 günlükte çizginin en az %5 altında (sert düşmüş) ama 1 saatlikte AL'a dönmüş ve kısa vadede (5dk/15dk/1s) hacim girişi olan hisseleri listeler (birkaç dakika sürebilir).\n\n"
-    "<b>/gunici</b>\n"
-    "BIST 30'u tarar; 5dk+15dk+1s'in ÜÇÜ BİRDEN AL'da olan, en az birinde hacim girişi ve en az birinde RSI teyidi olan gün içi trade adaylarını listeler (geçmiş trende bakmaz, sadece anlık gücü ölçer, birkaç dakika sürebilir).\n\n"
     "<b>/haber</b>\n"
     f"Son {HABER_LIMIT} ekonomi haberinden şiddeti {HABER_MIN_SIDDET}+ olanları tek tek, ayrı mesajlar halinde gönderir (liste olarak değil). "
     "Her haberin altına BIST için olumlu/olumsuz yönü, 10 üzerinden şiddeti, kısa gerekçesi ve günün akış yüzdesi eklenir.\n\n"
@@ -118,19 +111,6 @@ def get_updates(token, offset):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def format_all(results):
-    up = sorted([r for r in results if r["yon"] == 1], key=lambda r: r["mesafe_pct"], reverse=True)
-
-    now_str = time.strftime("%Y-%m-%d %H:%M", time.localtime())
-    lines = ["<b>📊 BIST 30 - Yükseliş Trendinde Olanlar (1S)</b>", now_str, ""]
-    for r in up:
-        rsi = f" RSI {r['rsi']:.0f}" if r["rsi"] is not None else ""
-        hacim = " 🔥" if r["yuksek_hacim"] else ""
-        tik = " ✅" if (r["rsi_uygun"] and r["yuksek_hacim"]) else ""
-        lines.append(f"  {r['ticker']} — {r['kapanis']:.2f} (%{r['mesafe_pct']:.1f}){rsi}{hacim}{tik}")
-    return "\n".join(lines)
-
-
 def format_multi(ticker, results):
     guncel_fiyat = next((s["kapanis"] for label in TIMEFRAME_LABELS_ORDERED
                           if (s := results.get(label))), None)
@@ -153,26 +133,19 @@ def format_multi(ticker, results):
 
 
 def handle_durum(token, chat_id, arg):
-    if arg:
-        ticker = arg.strip().upper()
-        send_telegram_message(token, chat_id, f"{ticker} taranıyor...")
-        results = {}
-        for label in TIMEFRAME_LABELS_ORDERED:
-            results[label] = get_timeframe_status(ticker, label)
-            time.sleep(REQUEST_DELAY_SEC)
-        if all(v is None for v in results.values()):
-            send_telegram_message(token, chat_id, f"'{ticker}' için veri alınamadı, hisse kodunu kontrol et.")
-            return
-        send_telegram_message(token, chat_id, format_multi(ticker, results))
-    else:
-        send_telegram_message(token, chat_id, "Taranıyor, birkaç saniye sürecek...")
-        results = []
-        for t in BIST30_TICKERS:
-            s = get_timeframe_status(t, "1s")
-            time.sleep(REQUEST_DELAY_SEC)
-            if s:
-                results.append(s)
-        send_telegram_message(token, chat_id, format_all(results))
+    if not arg:
+        send_telegram_message(token, chat_id, "Kullanım: /durum HISSE (örn. /durum THYAO)")
+        return
+    ticker = arg.strip().upper()
+    send_telegram_message(token, chat_id, f"{ticker} taranıyor...")
+    results = {}
+    for label in TIMEFRAME_LABELS_ORDERED:
+        results[label] = get_timeframe_status(ticker, label)
+        time.sleep(REQUEST_DELAY_SEC)
+    if all(v is None for v in results.values()):
+        send_telegram_message(token, chat_id, f"'{ticker}' için veri alınamadı, hisse kodunu kontrol et.")
+        return
+    send_telegram_message(token, chat_id, format_multi(ticker, results))
 
 
 def format_liste(ranked, top_n=10):
@@ -267,58 +240,6 @@ def handle_firsat(token, chat_id):
     send_telegram_message(token, chat_id, format_firsatlar(firsatlar))
 
 
-GUNICI_TIMEFRAMES = ("5dk", "15dk", "1s")
-
-
-def find_gunici_firsatlari(universe):
-    """Kısa vadede (5dk+15dk+1s) tam hizalanmış (hepsi AL), hacim girişi
-    olan ve RSI teyidi olan gün içi trade adaylarını bulur. Döner:
-    (ticker, durumlar) listesi, en güçlü 1s momentumundan en zayıfa."""
-    adaylar = []
-    for ticker in universe:
-        durumlar = {}
-        for label in GUNICI_TIMEFRAMES:
-            durumlar[label] = get_timeframe_status(ticker, label)
-            time.sleep(REQUEST_DELAY_SEC)
-        if not all(durumlar.values()):
-            continue
-        hepsi_al = all(durumlar[tf]["yon"] == 1 for tf in GUNICI_TIMEFRAMES)
-        hacim_var = any(durumlar[tf]["yuksek_hacim"] for tf in GUNICI_TIMEFRAMES)
-        rsi_teyit = any(durumlar[tf]["rsi_uygun"] for tf in GUNICI_TIMEFRAMES)
-        if hepsi_al and hacim_var and rsi_teyit:
-            adaylar.append((ticker, durumlar))
-
-    adaylar.sort(key=lambda x: x[1]["1s"]["mesafe_pct"], reverse=True)
-    return adaylar
-
-
-def format_gunici(adaylar):
-    lines = [
-        "<b>⚡ Gün İçi Fırsatları</b>",
-        "(5dk+15dk+1s hepsi AL, hacim girişi + RSI teyidi var)",
-        "",
-    ]
-    if not adaylar:
-        lines.append("Şu an kriterlere uyan hisse yok.")
-    else:
-        for ticker, d in adaylar:
-            lines.append(
-                f"• <b>{ticker}</b> — 5dk: %{d['5dk']['mesafe_pct']:.1f} | "
-                f"15dk: %{d['15dk']['mesafe_pct']:.1f} | 1s: %{d['1s']['mesafe_pct']:.1f} 🔥"
-            )
-    return "\n".join(lines)
-
-
-def handle_gunici(token, chat_id):
-    universe = BIST30_TICKERS
-    send_telegram_message(
-        token, chat_id,
-        f"{len(universe)} hisse taranıyor, bu birkaç dakika sürebilir...",
-    )
-    adaylar = find_gunici_firsatlari(universe)
-    send_telegram_message(token, chat_id, format_gunici(adaylar))
-
-
 def handle_haber(token, chat_id):
     try:
         items = fetch_rss_items()
@@ -402,13 +323,6 @@ def main():
                 print("Komut alindi: /firsat")
                 try:
                     handle_firsat(token, chat_id)
-                except Exception as e:
-                    print(f"Komut isleme hatasi: {e}")
-                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
-            elif text == "/gunici":
-                print("Komut alindi: /gunici")
-                try:
-                    handle_gunici(token, chat_id)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
