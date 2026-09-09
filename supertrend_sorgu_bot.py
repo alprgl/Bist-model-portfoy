@@ -3,8 +3,8 @@
 """
 BIST 30 SUPERTREND - ANLIK SORGU BOTU
 =======================================
-Telegram botuna gelen /durum komutlarını dinler, o anki (en son kapanmış
-1 saatlik mumdaki) Supertrend durumunu hesaplayıp cevap olarak gönderir.
+Telegram botuna gelen komutları dinler, istenen hissenin o anki
+Supertrend durumunu hesaplayıp cevap olarak gönderir.
 
 supertrend_alarm.py'deki periyodik tarama scriptinden BAĞIMSIZDIR - o
 sadece YENİ AL sinyali bulunca mesaj atar, bu ise istediğin an mevcut
@@ -13,7 +13,7 @@ KeepAlive ile arka planda hep açık tutulur).
 
 KOMUTLAR (Telegram'dan bota yaz)
 ---------------------------------
-    /durum THYAO    -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
+    /analiz THYAO   -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
     /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
                         zaman diliminde AL bölgesinde olan hisseleri sıralar
                         (0-6 arası puan, kendi seçer)
@@ -72,7 +72,7 @@ WELCOME_TEXT = (
 
 HELP_TEXT = (
     "<b>🤖 Supertrend Sorgu Botu - Komutlar</b>\n\n"
-    "<b>/durum HISSE</b>  (örn. /durum THYAO)\n"
+    "<b>/analiz HISSE</b>  (örn. /analiz THYAO)\n"
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
     "<b>/liste</b>\n"
     "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
@@ -132,9 +132,9 @@ def format_multi(ticker, results):
     return "\n".join(lines)
 
 
-def handle_durum(token, chat_id, arg):
+def handle_analiz(token, chat_id, arg):
     if not arg:
-        send_telegram_message(token, chat_id, "Kullanım: /durum HISSE (örn. /durum THYAO)")
+        send_telegram_message(token, chat_id, "Kullanım: /analiz HISSE (örn. /analiz THYAO)")
         return
     ticker = arg.strip().upper()
     send_telegram_message(token, chat_id, f"{ticker} taranıyor...")
@@ -281,7 +281,7 @@ def main():
         print("UYARI: Telegram ayari yok, dinleyici baslatilamiyor.")
         return
 
-    print("Anlik sorgu botu dinlemeye basladi (/durum, /durum HISSE)...")
+    print("Anlik sorgu botu dinlemeye basladi (/analiz HISSE, /liste, /firsat, /haber)...")
     offset = load_offset()
 
     while True:
@@ -304,11 +304,11 @@ def main():
                 continue  # yetkisiz kullanicidan gelen komutlari yoksay
 
             text = (message.get("text") or "").strip()
-            if text == "/durum" or text.startswith("/durum "):
-                arg = text[len("/durum"):].strip()
-                print(f"Komut alindi: /durum {arg}")
+            if text == "/analiz" or text.startswith("/analiz "):
+                arg = text[len("/analiz"):].strip()
+                print(f"Komut alindi: /analiz {arg}")
                 try:
-                    handle_durum(token, chat_id, arg)
+                    handle_analiz(token, chat_id, arg)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
