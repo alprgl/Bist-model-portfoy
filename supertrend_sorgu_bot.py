@@ -14,11 +14,9 @@ KeepAlive ile arka planda hep açık tutulur).
 KOMUTLAR (Telegram'dan bota yaz)
 ---------------------------------
     /analiz THYAO   -> tek bir hissenin 5dk/15dk/1s/4s/1g/1hf Supertrend durumu
-    /tara           -> analiz alarmının şartlarını (5m/15m/1h/2h AL + RSI +
-                        hacim) tüm BIST 30'da anında çalıştırır
-    /liste          -> BIST 30'u tüm zaman dilimlerinde tarar, şu an en çok
-                        zaman diliminde AL bölgesinde olan hisseleri sıralar
-                        (0-6 arası puan, kendi seçer)
+    /tara           -> BIST 30'u TÜM zaman dilimlerinde (5m-1hafta) tarar;
+                        Supertrend + RSI + hacim durumuna göre puanlayıp
+                        en iyi hisseleri sıralar
     /firsat         -> 1g'de sert düşmüş ama 1s'de AL'a dönmüş ve hacim
                         girişi olan (fırsat) hisseleri tarar
     /haber          -> son ekonomi haberlerini tek tek, ayrı mesajlar
@@ -40,7 +38,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from analiz_alarm import ANALIZ_TIMEFRAMES, TIMEFRAME_ADLARI, hisseyi_degerlendir
 from haber_alarm import (
     HABER_MIN_SIDDET,
     analyze_impact,
@@ -62,7 +59,7 @@ HABER_LIMIT = 10
 HABER_SEND_DELAY_SEC = 0.5
 
 TIMEFRAME_NAMES = {
-    "5dk": "5m", "15dk": "15m", "1s": "1h",
+    "5dk": "5m", "15dk": "15m", "1s": "1h", "2s": "2h",
     "4s": "4h", "1g": "1d", "1hf": "1w",
 }
 
@@ -78,9 +75,7 @@ HELP_TEXT = (
     "<b>/analiz HISSE</b>  (örn. /analiz THYAO)\n"
     "Bir hissenin 5dk/15dk/1s/4s/1g/1hf zaman dilimlerindeki Supertrend seviyelerini ve yönünü tek mesajda gösterir.\n\n"
     "<b>/tara</b>\n"
-    "Analiz alarmının şartlarını (5m/15m/1h/2h'nin hepsinde AL + RSI teyidi, en az birinde yüksek hacim) tüm BIST 30'da anında çalıştırır; alarmın bir sonraki taramasını beklemeden sonucu verir. Şartı sağlayan yoksa 'yakın olanları' da gösterir (~1-2 dakika).\n\n"
-    "<b>/liste</b>\n"
-    "BIST 30'u 6 zaman diliminin (5dk/15dk/1s/4s/1g/1hf) tamamında tarar; şu anki fiyata göre en çok zaman diliminde AL bölgesinde olanları kendi sıralayıp gösterir (0-6 puan, birkaç dakika sürebilir).\n\n"
+    "BIST 30'u 7 zaman diliminin (5m/15m/1h/2h/4h/1d/1w) tamamında tarar. Her zaman dilimi için Supertrend AL yönü, RSI teyidi ve yüksek hacim ayrı ayrı puanlanır (zaman dilimi başına 3, toplam 21 puan); en yüksek puanlı hisseler sıralanır (birkaç dakika sürebilir).\n\n"
     "<b>/firsat</b>\n"
     "BIST 30'u tarar; 1 günlükte çizginin en az %5 altında (sert düşmüş) ama 1 saatlikte AL'a dönmüş ve kısa vadede (5dk/15dk/1s) hacim girişi olan hisseleri listeler (birkaç dakika sürebilir).\n\n"
     "<b>/haber</b>\n"
@@ -153,32 +148,53 @@ def handle_analiz(token, chat_id, arg):
     send_telegram_message(token, chat_id, format_multi(ticker, results))
 
 
-def format_tara(uyanlar, yakinlar):
-    """Analiz alarminin sartlarini manuel taramanin sonucunu bicimlendirir."""
-    zamanlar = "/".join(TIMEFRAME_ADLARI[t] for t in ANALIZ_TIMEFRAMES)
+TARA_TIMEFRAMES = ("5dk", "15dk", "1s", "2s", "4s", "1g", "1hf")
+TARA_TOP_N = 10
+
+
+def hisse_puani(ticker):
+    """Hisseyi TUM zaman dilimlerinde puanlar. Her zaman dilimi icin en fazla
+    3 puan: Supertrend AL yonu (1), RSI teyidi (1), yuksek hacim (1)."""
+    al = rsi = hacim = 0
+    veri_var = False
+    for label in TARA_TIMEFRAMES:
+        s = get_timeframe_status(ticker, label)
+        time.sleep(REQUEST_DELAY_SEC)
+        if not s:
+            continue
+        veri_var = True
+        if s["yon"] == 1:
+            al += 1
+        if s["rsi_uygun"]:
+            rsi += 1
+        if s["yuksek_hacim"]:
+            hacim += 1
+    if not veri_var:
+        return None
+    return {"ticker": ticker, "al": al, "rsi": rsi, "hacim": hacim,
+            "puan": al + rsi + hacim}
+
+
+def format_tara(sonuclar):
+    n = len(TARA_TIMEFRAMES)
+    zamanlar = "/".join(TIMEFRAME_NAMES[t] for t in TARA_TIMEFRAMES)
     now_str = time.strftime("%Y-%m-%d %H:%M", time.localtime())
-    lines = [f"<b>🔍 Analiz Taraması ({zamanlar})</b>", now_str, ""]
+    lines = [
+        "<b>🏆 Genel Tarama — En İyi Hisseler</b>",
+        f"({zamanlar} × Supertrend+RSI+hacim, en yüksek {n * 3} puan)",
+        now_str,
+        "",
+    ]
+    if not sonuclar:
+        lines.append("Veri alınamadı.")
+        return "\n".join(lines)
 
-    if uyanlar:
-        lines.append("<b>✅ Şartların hepsini sağlayan:</b>")
-        for ticker, d in uyanlar:
-            detay = " · ".join(
-                f"{TIMEFRAME_ADLARI[tf]} %{d[tf]['mesafe_pct']:.1f}" for tf in ANALIZ_TIMEFRAMES
-            )
-            lines.append(f"• <b>{ticker}</b> — {detay} 🔥")
-    else:
-        lines.append("✅ Şartların hepsini sağlayan hisse yok.")
-
-    if yakinlar:
-        lines.append("")
-        lines.append("<b>⚠️ Yakın olanlar</b> (4/4 AL ama teyit eksik):")
-        for ticker, rsi_sayi, hacim in yakinlar:
-            eksik = []
-            if rsi_sayi < len(ANALIZ_TIMEFRAMES):
-                eksik.append(f"RSI {rsi_sayi}/{len(ANALIZ_TIMEFRAMES)}")
-            if not hacim:
-                eksik.append("hacim yok")
-            lines.append(f"• {ticker} — {', '.join(eksik)}")
+    for i, r in enumerate(sonuclar[:TARA_TOP_N], 1):
+        hacim = f" · 🔥 {r['hacim']}" if r["hacim"] else ""
+        lines.append(
+            f"{i}. <b>{r['ticker']}</b> — {r['puan']}/{n * 3}   "
+            f"AL {r['al']}/{n} · RSI {r['rsi']}/{n}{hacim}"
+        )
     return "\n".join(lines)
 
 
@@ -186,60 +202,20 @@ def handle_tara(token, chat_id):
     universe = BIST30_TICKERS
     send_telegram_message(
         token, chat_id,
-        f"{len(universe)} hisse taranıyor (5m/15m/1h/2h), ~1-2 dakika sürer...",
+        f"{len(universe)} hisse, {len(TARA_TIMEFRAMES)} zaman diliminde taranıyor, "
+        "birkaç dakika sürebilir...",
     )
-    uyanlar, yakinlar = [], []
+    sonuclar = []
     for ticker in universe:
         try:
-            uygun, durumlar = hisseyi_degerlendir(ticker)
+            r = hisse_puani(ticker)
         except Exception as e:
             print(f"  {ticker}: hata - {e}")
             continue
-        if not all(durumlar.values()):
-            continue
-        if uygun:
-            uyanlar.append((ticker, durumlar))
-            continue
-        if all(durumlar[tf]["yon"] == 1 for tf in ANALIZ_TIMEFRAMES):
-            rsi_sayi = sum(1 for tf in ANALIZ_TIMEFRAMES if durumlar[tf]["rsi_uygun"])
-            hacim = any(durumlar[tf]["yuksek_hacim"] for tf in ANALIZ_TIMEFRAMES)
-            yakinlar.append((ticker, rsi_sayi, hacim))
-    send_telegram_message(token, chat_id, format_tara(uyanlar, yakinlar))
-
-
-def format_liste(ranked, top_n=10):
-    shown = [item for item in ranked if item[1] > 0][:top_n]
-    n_tf = len(TIMEFRAME_LABELS_ORDERED)
-    lines = [
-        "<b>🏆 En Çok Zaman Diliminde AL Bölgesinde Olan Hisseler</b>",
-        f"(şu an 5dk/15dk/1s/4s/1g/1hf içinden kaçında AL, en yüksek {n_tf}/{n_tf})",
-        "",
-    ]
-    if not shown:
-        lines.append("Şu an hiçbir hissede AL sinyali yok.")
-    else:
-        for i, (ticker, score) in enumerate(shown, 1):
-            lines.append(f"{i}. {ticker} — {score}/{n_tf}")
-    return "\n".join(lines)
-
-
-def handle_liste(token, chat_id):
-    universe = BIST30_TICKERS
-    send_telegram_message(
-        token, chat_id,
-        f"{len(universe)} hisse, 6 zaman diliminde taranıyor, bu birkaç dakika sürebilir...",
-    )
-    scores = {}
-    for ticker in universe:
-        score = 0
-        for label in TIMEFRAME_LABELS_ORDERED:
-            s = get_timeframe_status(ticker, label)
-            time.sleep(REQUEST_DELAY_SEC)
-            if s and s["yon"] == 1:
-                score += 1
-        scores[ticker] = score
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    send_telegram_message(token, chat_id, format_liste(ranked))
+        if r:
+            sonuclar.append(r)
+    sonuclar.sort(key=lambda r: (r["puan"], r["al"], r["hacim"]), reverse=True)
+    send_telegram_message(token, chat_id, format_tara(sonuclar))
 
 
 FIRSAT_UZAK_ESIK = -5.0  # 1g'de cizginin en az bu kadar altinda olmali (sert dusus)
@@ -340,7 +316,7 @@ def main():
         print("UYARI: Telegram ayari yok, dinleyici baslatilamiyor.")
         return
 
-    print("Anlik sorgu botu dinlemeye basladi (/analiz HISSE, /tara, /liste, /firsat, /haber)...")
+    print("Anlik sorgu botu dinlemeye basladi (/analiz HISSE, /tara, /firsat, /haber)...")
     offset = load_offset()
 
     while True:
@@ -375,13 +351,6 @@ def main():
                 print("Komut alindi: /tara")
                 try:
                     handle_tara(token, chat_id)
-                except Exception as e:
-                    print(f"Komut isleme hatasi: {e}")
-                    send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
-            elif text == "/liste":
-                print("Komut alindi: /liste")
-                try:
-                    handle_liste(token, chat_id)
                 except Exception as e:
                     print(f"Komut isleme hatasi: {e}")
                     send_telegram_message(token, chat_id, "Sorgu sirasinda bir hata olustu.")
