@@ -71,10 +71,16 @@ TIMEFRAME_CONFIG = {
     "5dk": ("5m", "5d"),
     "15dk": ("15m", "1mo"),
     "1s": ("60m", "1mo"),
+    "2s": ("60m", "3mo"),
     "4s": ("60m", "3mo"),
     "1g": ("1d", "1y"),
     "1hf": ("1wk", "5y"),
 }
+# 60 dakikalik mumlardan kac mum birlestirilerek uretilecegi (Yahoo'da bu
+# zaman dilimleri yerel olarak yok).
+RESAMPLE_GROUP = {"2s": 2, "4s": 4}
+# /durum HISSE ve /liste bu listeyi kullanir; "2s" sadece /analiz icin
+# tanimlidir, mevcut ekranlarin gorunumunu degistirmesin diye buraya alinmadi.
 TIMEFRAME_LABELS_ORDERED = ["5dk", "15dk", "1s", "4s", "1g", "1hf"]
 
 
@@ -196,11 +202,11 @@ def volume_ratio(candles, lookback=20):
 
 def get_timeframe_candles(ticker, label):
     """TIMEFRAME_CONFIG'teki bir zaman dilimi etiketi için kapanmış mum
-    serisini döner (4s için 60 dakikalık mumlardan yeniden örneklenir)."""
-    if label == "4s":
-        hourly = get_closed_candles(ticker, "60m", TIMEFRAME_CONFIG["4s"][1])
-        return resample_ohlc(hourly, 4)
+    serisini döner (2s/4s için 60 dakikalık mumlardan yeniden örneklenir)."""
     interval, range_ = TIMEFRAME_CONFIG[label]
+    if label in RESAMPLE_GROUP:
+        hourly = get_closed_candles(ticker, "60m", range_)
+        return resample_ohlc(hourly, RESAMPLE_GROUP[label])
     return get_closed_candles(ticker, interval, range_)
 
 
