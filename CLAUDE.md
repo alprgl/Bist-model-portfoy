@@ -133,6 +133,20 @@ yeniden bildirir (`analiz_alarm_state.json`).
   gerçek kapanışı yerine eski bir mumla hesaplanıyordu. `resample_ohlc` artık
   eksik kalan son grubu da dahil ediyor.
 
+- **Yahoo haftalık seride sahte mum:** Gerçek hafta mumları Pazartesi 00:00
+  damgalı ve tüm haftanın hacmini taşır; Yahoo bunların sonuna o günün
+  verisinden oluşan sahte bir mum ekliyor (ör. Cuma 18:09 damgalı, tek günlük
+  hacim). `candle_is_closed` bunu kapanmış hafta sanıyordu, dolayısıyla `1hf`
+  Supertrend/RSI/hacim değerleri tek günlük kırpık veriden hesaplanıyordu —
+  özellikle hacim oranı sistematik olarak düşük çıkıyordu. `fetch_candles`
+  artık `1wk` serisinde gece yarısı damgalı olmayan sondaki mumları atıyor.
+  (Backtest sırasında bulundu, 12.09.2026.)
+- **`/tara` puanlamasında RSI yön hatası:** `rsi_uygun` yön-bağımlıdır, SAT
+  yönünde de (30<RSI<50) `True` döner. `hisse_puani` bunu yön kontrolü
+  yapmadan sayıyordu; yani "en iyi hisseler" sıralamasında düşüş trendinin
+  teyit edilmiş olması puan kazandırıyordu. Artık RSI puanı sadece AL yönünde
+  veriliyor. (Aynı backtest'te bulundu.)
+
 ## Bilinen sınırlar
 
 - Yahoo'nun günlük (`1d`) serisi bazı hisselerde 1-2 gün gecikmeli gelir;

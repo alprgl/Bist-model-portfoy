@@ -165,8 +165,11 @@ def hisse_puani(ticker):
         veri_var = True
         if s["yon"] == 1:
             al += 1
-        if s["rsi_uygun"]:
-            rsi += 1
+            # rsi_uygun yon-bagimlidir: SAT yonunde de (30<RSI<50) True doner.
+            # Burada "en iyi hisse" araniyor, dusus trendinin teyit edilmesi
+            # puan kazandirmamali - RSI puani sadece AL yonunde verilir.
+            if s["rsi_uygun"]:
+                rsi += 1
         if s["yuksek_hacim"]:
             hacim += 1
     if not veri_var:

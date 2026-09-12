@@ -111,6 +111,16 @@ def fetch_candles(ticker, interval, range_):
         v = quote["volume"][i] or 0
         candles.append((datetime.fromtimestamp(ts, tz=timezone.utc), o, h, l, c, v))
     candles.sort(key=lambda x: x[0])
+
+    # Yahoo haftalik seride, gercek hafta mumlarinin (Pazartesi 00:00 damgali,
+    # tum haftanin hacmini tasiyan) sonuna o gunun verisinden olusan sahte bir
+    # mum ekliyor (orn. Cuma 18:09 damgali, tek gunluk hacim). Bu mum kapanmis
+    # hafta sanilirsa Supertrend/RSI/hacim hepsi tek gunluk kirpik veriden
+    # hesaplanir. Hafta mumu olmayanlari (gece yarisi damgali olmayan) at.
+    if interval == "1wk":
+        while candles and candles[-1][0].astimezone(ISTANBUL_TZ).timetuple()[3:5] != (0, 0):
+            candles.pop()
+
     return candles
 
 
