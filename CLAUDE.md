@@ -147,6 +147,37 @@ yeniden bildirir (`analiz_alarm_state.json`).
   teyit edilmiş olması puan kazandırıyordu. Artık RSI puanı sadece AL yönünde
   veriliyor. (Aynı backtest'te bulundu.)
 
+## Fon sistemi — backtest bulguları (12.09.2026)
+
+`backtest_fon.py` kuralı TEFAS'ın geçmiş verisiyle 10 dönem yeniden kurdu
+(2025-11 … 2026-08). Ortaya çıkanlar:
+
+- **`fon_portfoy.csv`'deki `entry_price` tarama gününün fiyatıdır**, ama o
+  fiyattan alım mümkün değil — emir o akşam verilir, ertesi işlem günü
+  fiyatından gerçekleşir (valör). Gerçek getiri CSV'nin gösterdiğinden bir
+  miktar düşük.
+- **Getiriyi üreten şey momentum, üç katmanlı skor değil.** Ablasyon testinde
+  "sadece 1 aylık getirisi en yüksek 6 fon" daha yüksek ortalama verdi
+  (+%14,6 vs +%11,0). Skorun asıl işlevi **kuyruğu kesmek**: tek başına skor
+  ortalamada zayıf (+%5,1) ama hiç eksi ay vermiyor; saf momentumun en kötü
+  ayı −%39, tam kuralınki −%3,2.
+- **Kapasite tuzağı (düzeltilmedi, dikkat):** Mevcut risk filtresi (≥10 Mn TL,
+  ≥10 kişi) karar günü ölçtüğü için küçülmekte olan fonları geçiriyor. Bir
+  dönemde seçilen STM, ertesi gün 102,9 Mn TL'den 402 bin TL'ye düşmüş ve
+  kalan minik bakiyede NAV %51 sıçramıştı — o aya yazılan +%25'in tamamı bu
+  artefakttan geliyordu. Kapasite şartı (≥100 yatırımcı, ≥50 Mn TL) eklenince
+  sonuç kötüleşmiyor, **iyileşiyor** (+%11,9, en kötü ay +%5,8).
+- **Çeşitlendirme illüzyonu:** Kural varlık sınıfına bakmıyor. Bir dönemde
+  seçilen 6 fonun altısı da gümüş fonuydu — "6 fonluk sepet" tek bir emtia
+  bahsiydi.
+- **Sepet çoğu ay dolmuyor:** aday havuzu 2-12 fon arası; bazı aylar 2-3 fon
+  seçiliyor. Boş kontenjan nakitte mi tutulmalı, kalanlara mı bölünmeli —
+  karar verilmedi, 10 ayda aradaki fark ~500 bin TL.
+- **TEFAS API tuzağı:** tarih aralığı sınırı gün değil **takvim ayı** bazlı.
+  30 günlük adım Şubat'ı aşınca API hata vermeden **boş liste** dönüyor.
+  `backtest_fon.py` bu yüzden 28 günlük adım kullanıyor ve boş cevabı asla
+  önbelleğe almıyor — yoksa sessizce eksik veriyle çalışılır.
+
 ## Bilinen sınırlar
 
 - Yahoo'nun günlük (`1d`) serisi bazı hisselerde 1-2 gün gecikmeli gelir;
