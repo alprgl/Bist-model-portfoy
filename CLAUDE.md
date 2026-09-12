@@ -192,4 +192,12 @@ python3 backtest.py --cikis       # girişi sabit tutup çıkış varyantların�
 - Değişiklik sonrası `python3 -m py_compile <dosya>` ile derle; servisi
   ilgilendiriyorsa `launchctl kickstart -k gui/501/com.alpergul.<servis>`.
 - `.claude/agents/` altında bu projeye özel 3 alt-agent tanımlı: `kodcu`
-  (özellik yazar), `backtest` (strateji test eder), `dokuman` (bu dosyayı günceller).
+  (özellik yazar), `backtest` (strateji test eder), `dokuman` (dokümanı denetler).
+
+**Agent'a ne zaman devredilir:** Brifing maliyeti işin kendisinden azsa. Uzun,
+kendi içinde kapalı, bol çıktılı işler (backtest koşusu, dokümanın toptan
+denetimi) agent'a gider. Bu dosyaya "şu karar şu yüzden verildi" notu düşmek
+gibi küçük işler koordinatörde kalır — gerekçe zaten konuşmada, agent'a
+anlatmak yazmaktan uzun sürer. Agent'ın raporu niyetini anlatır, gerçeği
+değil: iş bittiğinde kod/çıktı koordinatör tarafından doğrulanır, öyle
+commit edilir. (Bu pratik bugüne kadar iki hata yakaladı.)
