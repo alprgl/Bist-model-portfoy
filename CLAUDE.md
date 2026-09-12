@@ -7,6 +7,22 @@ standart kütüphanesiyle yazılmış (urllib, json). Amaç yatırım tavsiyesi
 Bu dosyanın amacı: aylar sonra geri döndüğünde "bu eşik neden bu, bu satır
 neden böyle" sorularına cevap vermek. Sadece "ne" değil "neden" yazılıyor.
 
+## ⚠️ Bu dosyayı güncel tutma kuralı (her oturum için geçerli)
+
+**Her işin sonunda, commit etmeden önce bu dosyayı güncelle.** Konuşma bitince
+orada konuşulanlar kaybolur; kalıcı olan tek şey kod ve bu dosyadır.
+
+Şunlar olduğunda buraya yaz:
+- Bir eşik/sabit değiştiyse → yeni değeri ve **neden** değiştiğini
+- Bir komut/servis eklendi, kaldırıldı veya yeniden adlandırıldıysa
+- Bir tasarım kararı verildiyse → özellikle "şöyle de yapabilirdik ama şu
+  yüzden yapmadık" türünden olanları
+- Bir tuzak/hata keşfedildiyse → belirtisi, sebebi, çözümü
+- Bir sınır öğrenildiyse (veri kaynağı, API, platform) → "Bilinen sınırlar"a
+
+Yazma: tek seferlik düzeltmeler, yazım hataları, geçici denemeler. Dosya
+şişerse okunmaz olur, o zaman işe yaramaz hale gelir.
+
 ## Parçalar
 
 | Dosya | Görev |
