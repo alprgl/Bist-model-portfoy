@@ -191,13 +191,15 @@ python3 backtest.py --cikis       # girişi sabit tutup çıkış varyantların�
 - Ölü kod bırakılmaz: bir özellik kaldırılınca ona ait sabit/yardım metni de gider.
 - Değişiklik sonrası `python3 -m py_compile <dosya>` ile derle; servisi
   ilgilendiriyorsa `launchctl kickstart -k gui/501/com.alpergul.<servis>`.
-- `.claude/agents/` altında bu projeye özel 3 alt-agent tanımlı: `kodcu`
-  (özellik yazar), `backtest` (strateji test eder), `dokuman` (dokümanı denetler).
+- `.claude/agents/` altında bu projeye özel 2 alt-agent tanımlı: `kodcu`
+  (özellik yazar), `backtest` (strateji test eder). Bir `dokuman` agent'ı da
+  vardı, kaldırıldı: bu dosyayı güncellemek küçük ve gerekçe gerektiren bir iş,
+  agent'a anlatmak yazmaktan uzun sürüyordu — koordinatörde kalması daha doğru.
 
 **Agent'a ne zaman devredilir:** Brifing maliyeti işin kendisinden azsa. Uzun,
-kendi içinde kapalı, bol çıktılı işler (backtest koşusu, dokümanın toptan
-denetimi) agent'a gider. Bu dosyaya "şu karar şu yüzden verildi" notu düşmek
-gibi küçük işler koordinatörde kalır — gerekçe zaten konuşmada, agent'a
-anlatmak yazmaktan uzun sürer. Agent'ın raporu niyetini anlatır, gerçeği
-değil: iş bittiğinde kod/çıktı koordinatör tarafından doğrulanır, öyle
-commit edilir. (Bu pratik bugüne kadar iki hata yakaladı.)
+kendi içinde kapalı, bol çıktılı işler (örn. backtest koşusu) agent'a gider.
+Bu dosyaya "şu karar şu yüzden verildi" notu düşmek gibi küçük işler
+koordinatörde kalır — gerekçe zaten konuşmada, agent'a anlatmak yazmaktan uzun
+sürer. Agent'ın raporu niyetini anlatır, gerçeği değil: iş bittiğinde
+kod/çıktı koordinatör tarafından doğrulanır, öyle commit edilir. (Bu pratik
+bugüne kadar iki hata yakaladı.)
