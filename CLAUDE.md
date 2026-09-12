@@ -40,8 +40,17 @@ Yazma: tek seferlik düzeltmeler, yazım hataları, geçici denemeler. Dosya
 launchd ile `~/Library/LaunchAgents/com.alpergul.*.plist` üzerinden çalışırlar,
 `KeepAlive` ile ayakta tutulur. **Şu an:**
 
-- **AÇIK:** `analiz-alarm`, `supertrend-sorgu-bot`
+- **AÇIK:** `analiz-alarm`, `supertrend-sorgu-bot`, `fon-tarama`
 - **KAPALI (kalıcı, kasıtlı):** `haber-alarm`, `supertrend-alarm`
+
+`fon-tarama` hafta içi 09:30 ve 20:00'de `fon_model_portfoy.py`'yi çalıştırır;
+script kendi içinde `docs/`'u güncelleyip GitHub'a push eder, Pages birkaç
+dakikada tazelenir. **Neden kuruldu:** fon taraması uzun süre elle
+çalıştırılıyordu ve site fark edilmeden 4 gün bayatladı. İki kez
+çalıştırılmasının sebebi TEFAS'ın gün verisini akşam yayınlaması — akşamki
+koşu o günü yakalar, sabahki koşu akşam kaçırılmışsa telafi eder.
+**Dikkat:** bu servis `/opt/homebrew/bin/python3` kullanır (sistem
+python'unda `openpyxl` yok, Excel çıktısı orada patlar).
 
 Durumu kontrol et: `launchctl list | grep alpergul`
 
