@@ -7,8 +7,17 @@ statik bir site üretir. Sadece Python standart kütüphanesiyle yazılmış
 **13.09.2026'da ayrıldı:** Bu repo eskiden `~/bist_model_portfoy` adıyla BIST
 Supertrend/sinyal sistemini de içeriyordu. O taraf ayrı, bağımsız bir repoya
 (`~/hersey_guzel_olacak/bist_stocks_signal_robot`) taşındı. Bu repo eski git
-geçmişini ve GitHub remote'unu (`github.com/alprgl/Bist-model-portfoy`)
-aynen devraldı — GitHub Pages sitesi kesintisiz yayında kaldı.
+geçmişini ve GitHub remote'unu aynen devraldı — GitHub Pages sitesi kesintisiz
+yayında kaldı.
+
+**13.09.2026'da yeniden adlandırıldı:** GitHub reposu `Bist-model-portfoy` →
+`tefas-search-robot`. **Neden:** klasör TEFAS'tı ama repo kimliği BIST kalmıştı;
+Claude Code sol barda projeyi remote'taki repo adından etiketlediği için her
+oturumda yanlış proje görünüyordu. **Bedeli kabul edildi:** Pages adresi
+`alprgl.github.io/Bist-model-portfoy/` → `alprgl.github.io/tefas-search-robot/`
+oldu. GitHub eski adresten yönlendirme yapıyor, ama eski ad başkası tarafından
+alınırsa o yönlendirme kırılır. `docs/` içeriğinde ve scriptlerde mutlak URL
+yok, o yüzden site içi linkler etkilenmedi.
 
 Bu dosyanın amacı: aylar sonra geri döndüğünde "bu eşik neden bu, bu satır
 neden böyle" sorularına cevap vermek. Sadece "ne" değil "neden" yazılıyor.
