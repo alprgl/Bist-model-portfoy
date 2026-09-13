@@ -44,6 +44,8 @@ import json
 import time
 import urllib.request
 import urllib.error
+import http.client
+import socket
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -128,6 +130,18 @@ REQUEST_HEADERS = {
 # AĞ / VERİ ÇEKME
 # =============================================================================
 
+# Baglanti seviyesindeki gecici ariza turleri. TEFAS zaman zaman el sikismayi
+# yaniti vermeden kapatiyor (RemoteDisconnected); bunlar 429 gibi tekrar
+# denenebilir, cunku istegin kendisinde bir sorun yok.
+GECICI_AG_HATALARI = (
+    urllib.error.URLError,          # DNS / baglanti kurulamadi
+    http.client.RemoteDisconnected,  # sunucu yanitsiz kapatti
+    http.client.IncompleteRead,      # govde yarim geldi
+    ConnectionError,                 # reset / refused / aborted
+    socket.timeout,
+)
+
+
 def tefas_post(url: str, payload: dict, retries: int = 5):
     data = json.dumps(payload).encode("utf-8")
     last_err = None
@@ -138,13 +152,23 @@ def tefas_post(url: str, payload: dict, retries: int = 5):
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             last_err = e
-            if e.code == 429:
+            # 429 ve 5xx sunucu tarafinda gecici; 4xx bizim istegimiz bozuk
+            # demek, tekrar denemek ayni sonucu verir - hemen patlat.
+            if e.code == 429 or e.code >= 500:
                 wait = 3.0 * attempt
-                print(f"  [uyari] 429 Too Many Requests, {wait:.0f}sn bekleniyor (deneme {attempt}/{retries})...")
+                print(f"  [uyari] HTTP {e.code}, {wait:.0f}sn bekleniyor (deneme {attempt}/{retries})...")
                 time.sleep(wait)
             else:
                 raise
-    raise RuntimeError(f"{url} alinamadi (429 tekrar denemeleri tukendi): {last_err}")
+        except GECICI_AG_HATALARI as e:
+            # HTTPError da URLError'dan tureme oldugu icin sirasi onemli:
+            # yukaridaki blok onu zaten yakaladi, buraya sadece gercek
+            # baglanti arizalari duser.
+            last_err = e
+            wait = 3.0 * attempt
+            print(f"  [uyari] baglanti hatasi ({type(e).__name__}), {wait:.0f}sn bekleniyor (deneme {attempt}/{retries})...")
+            time.sleep(wait)
+    raise RuntimeError(f"{url} alinamadi ({retries} deneme tukendi): {last_err}")
 
 
 def fetch_fon_turleri():
