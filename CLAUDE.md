@@ -15,9 +15,13 @@ yayında kaldı.
 Claude Code sol barda projeyi remote'taki repo adından etiketlediği için her
 oturumda yanlış proje görünüyordu. **Bedeli kabul edildi:** Pages adresi
 `alprgl.github.io/Bist-model-portfoy/` → `alprgl.github.io/tefas-search-robot/`
-oldu. GitHub eski adresten yönlendirme yapıyor, ama eski ad başkası tarafından
-alınırsa o yönlendirme kırılır. `docs/` içeriğinde ve scriptlerde mutlak URL
-yok, o yüzden site içi linkler etkilenmedi.
+oldu. **Eski Pages adresi yönlendirilmiyor — 404 veriyor** (doğrulandı).
+GitHub yeniden adlandırmada sadece *repo* URL'ini yönlendiriyor, *Pages*
+sitesini değil; git remote eski URL'le çalışmaya devam eder ama tarayıcıdaki
+eski site linki ölür. `docs/` içeriğinde ve scriptlerde mutlak URL yok, o
+yüzden site içi linkler etkilenmedi.
+
+Yeni yayın adresi: `https://alprgl.github.io/tefas-search-robot/fon-model-portfoy.html`
 
 Bu dosyanın amacı: aylar sonra geri döndüğünde "bu eşik neden bu, bu satır
 neden böyle" sorularına cevap vermek. Sadece "ne" değil "neden" yazılıyor.
