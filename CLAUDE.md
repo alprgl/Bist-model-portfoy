@@ -73,6 +73,31 @@ Başlat: `launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.alpergul.fon-ta
 Mac uyku moduna geçerse servis durur — geri döndüğünde koşu kaçmış olabilir,
 kontrol et (aynı gün içindeki ikinci koşu genelde telafi eder).
 
+**Servisin sağlığını nasıl anlarsın:** `launchctl list | grep alpergul`
+çıktısındaki ikinci sütun son koşunun çıkış kodudur. `0` = başarılı,
+`1` = koşu patlamış. Site bayatsa ilk bakılacak yer burası, ikincisi
+`fon_tarama.log`'un sonu.
+
+### Tuzak: geçici ağ hatası taramayı komple çökertiyordu (13.09.2026)
+
+**Belirti:** `launchctl list` çıkış kodu `1`, log'un sonunda
+`http.client.RemoteDisconnected`, site sessizce bayat kalıyor.
+
+**Sebep:** `tefas_post` tekrar denemeyi sadece HTTP 429 için yapıyordu.
+Bağlantı seviyesindeki hatalar (`URLError`, `RemoteDisconnected`,
+`IncompleteRead`, `ConnectionError`, `socket.timeout`) hiçbir `except`
+bloğuna düşmediği için tarama ilk istekte ölüyordu. TEFAS el sıkışmayı
+yanıtsız kapattığında script fon türlerini bile çekemeden patlıyordu.
+
+**Çözüm:** Bu hata türleri `GECICI_AG_HATALARI` altında toplandı ve artan
+beklemeyle tekrar deneniyor. HTTP 5xx de tekrar denenebilir sayıldı. 4xx
+(429 hariç) hâlâ anında patlıyor — istek bozuk demektir, tekrar denemek aynı
+sonucu verir.
+
+**Hâlâ açık:** Koşu patlarsa kimse haberdar olmuyor. Site bayatladığını ancak
+elle bakınca fark ediyorsun (bu daha önce 4 gün sürmüştü). Bir uyarı
+mekanizması yok — karar verilmedi.
+
 **`docs/` klasörü hem bu proje hem eski `bist_model_portfoy.py`'nin çıktısını
 barındırıyordu** (`index.html` + `fon.html`/`fon-model-portfoy.html`).
 Bölünmede `docs/` bu repoda kaldığı için `index.html`/`metodoloji.pdf` hâlâ
